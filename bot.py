@@ -401,9 +401,20 @@ async def eliminar_mensaje_despues(mensaje, segundos):
         pass
 
 
-def es_grupo_pruebas(chat):
-    username = (getattr(chat, "username", None) or "").lstrip("@")
-    return username.lower() == GRUPO_PRUEBAS_USERNAME.lower()
+def username_chat(chat):
+    return (getattr(chat, "username", None) or "").lstrip("@").lower()
+
+
+def usernames_grupos_oficiales():
+    return {username.lower() for _, _, username, _ in GRUPOS_OFICIALES}
+
+
+def es_grupo_controlado(chat):
+    username = username_chat(chat)
+    return (
+        username == GRUPO_PRUEBAS_USERNAME.lower()
+        or username in usernames_grupos_oficiales()
+    )
 
 
 async def mostrar_aviso_union_temporal(mensaje):
@@ -453,8 +464,8 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await mensaje.reply_text(
             "🛡️ MAXIMO CONTROL GROUP\n\n"
             "Bot moderador conectado correctamente.\n\n"
-            "Membresía 7/7 preparada.\n"
-            "Moderación activa únicamente en @Orma_Pruebas."
+            "Membresía 7/7 activa en los 7 grupos oficiales.\n"
+            "@Orma_Pruebas continúa habilitado como laboratorio."
         )
 
 
@@ -465,13 +476,14 @@ async def maximo_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await mensaje.reply_text(
         "✅ MaximoControlGroup operativo\n"
-        "🔐 Membresía: 7/7 configurada\n"
-        "🧪 Moderación: solo @Orma_Pruebas\n"
+        "🔐 Membresía: 7/7 activa\n"
+        "🌐 Moderación: 7 grupos oficiales + @Orma_Pruebas\n"
+        "🚫 Castigos/baneos: desactivados\n"
         "🛡️ Control publicitario general: pendiente"
     )
 
 
-async def control_membresia_grupo_pruebas(
+async def control_membresia_grupos(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
@@ -484,7 +496,7 @@ async def control_membresia_grupo_pruebas(
         or not usuario
         or not chat
         or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
-        or not es_grupo_pruebas(chat)
+        or not es_grupo_controlado(chat)
     ):
         return
 
@@ -632,7 +644,7 @@ async def main():
     maximo_app.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS & ~filters.COMMAND,
-            control_membresia_grupo_pruebas,
+            control_membresia_grupos,
         )
     )
 
@@ -652,7 +664,8 @@ async def main():
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")
     logging.info("Membresía obligatoria configurada: 7/7.")
-    logging.info("Moderación activa SOLO en @%s.", GRUPO_PRUEBAS_USERNAME)
+    logging.info("Moderación 7/7 activa en los 7 grupos oficiales.")
+    logging.info("@%s permanece como laboratorio de pruebas.", GRUPO_PRUEBAS_USERNAME)
 
     try:
         await asyncio.Event().wait()

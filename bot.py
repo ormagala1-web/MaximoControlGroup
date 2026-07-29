@@ -42,6 +42,20 @@ GRUPOS_OFICIALES = [
     (7, "🎭 MUNDO STREAMING PERÚ 🇵🇪", "mymundostreaming", "MundoStreamingPeru_bot"),
 ]
 
+# Bots oficiales excluidos DE RAÍZ del control 7/7.
+# Cualquier otro bot, usuario o administrador sí queda sujeto a la regla.
+BOTS_OFICIALES_EXENTOS = {
+    "distritostreaminguniversal_bot",
+    "streamingdigitalperucho_bot",
+    "peruentretenimientostreaming_bot",
+    "mucastbot",
+    "universocibertneticoperu_bot",
+    "metaversoperu_bot",
+    "mundostreamingperu_bot",
+    "maximocontrolgroup_bot",
+    "unionmembresia_bot",
+}
+
 MAXIMO_APP_REF = None
 UNION_APP_REF = None
 
@@ -419,6 +433,63 @@ async def eliminar_mensaje_despues(mensaje, segundos):
         pass
 
 
+def username_usuario(user):
+    return (getattr(user, "username", None) or "").lstrip("@").lower()
+
+
+def es_bot_oficial_exento(user):
+    return bool(
+        getattr(user, "is_bot", False)
+        and username_usuario(user) in BOTS_OFICIALES_EXENTOS
+    )
+
+
+def nombre_visible_usuario(user):
+    nombre = " ".join(
+        parte
+        for parte in [
+            getattr(user, "first_name", None),
+            getattr(user, "last_name", None),
+        ]
+        if parte
+    ).strip()
+
+    return nombre or "Sin nombre visible"
+
+
+def etiqueta_tipo_usuario(user):
+    return "BOT" if getattr(user, "is_bot", False) else "USUARIO"
+
+
+def etiqueta_rol_chat_member(chat_member):
+    estado = str(getattr(chat_member, "status", "") or "").lower()
+
+    mapa = {
+        "creator": "Propietario",
+        "administrator": "Administrador",
+        "member": "Miembro",
+        "restricted": "Restringido",
+        "left": "Fuera del grupo",
+        "kicked": "Expulsado",
+    }
+
+    return mapa.get(estado, estado or "Desconocido")
+
+
+async def obtener_rol_en_grupo(chat_id, user_id):
+    if MAXIMO_APP_REF is None:
+        return "Desconocido"
+
+    try:
+        miembro = await MAXIMO_APP_REF.bot.get_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+        return etiqueta_rol_chat_member(miembro)
+    except TelegramError:
+        return "Desconocido"
+
+
 def username_chat(chat):
     return (getattr(chat, "username", None) or "").lstrip("@").lower()
 
@@ -469,12 +540,14 @@ async def eliminar_aviso_membresia_programado(
 async def mostrar_aviso_union_temporal(
     context,
     chat_id,
-    user_id,
+    usuario,
+    estado,
 ):
+    user_id = usuario.id
     clave = (chat_id, user_id)
     anterior_id = AVISOS_MEMBRESIA_ACTIVOS.get(clave)
 
-    # Evita acumular avisos si el usuario insiste varias veces.
+    # Evita acumular avisos si insiste varias veces en el mismo grupo.
     if anterior_id:
         try:
             await context.bot.delete_message(
@@ -484,19 +557,36 @@ async def mostrar_aviso_union_temporal(
         except TelegramError:
             pass
 
+    username = (
+        f"@{usuario.username}"
+        if getattr(usuario, "username", None)
+        else "Sin @username"
+    )
+    nombre = nombre_visible_usuario(usuario)
+    tipo = etiqueta_tipo_usuario(usuario)
+    rol = await obtener_rol_en_grupo(chat_id, user_id)
+    progreso = f"{len(estado['completados'])}/{estado['total']}"
+
+    texto_aviso = (
+        "🔒 <b>MEMBRESÍA PENDIENTE</b>\n\n"
+        f"👤 <b>Nombre:</b> {nombre}\n"
+        f"🔗 <b>Usuario:</b> {username}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"🏷️ <b>Tipo:</b> {tipo}\n"
+        f"🛡️ <b>Rol:</b> {rol}\n"
+        f"📊 <b>Membresía:</b> {progreso}\n\n"
+        "Para participar debes completar tu membresía en los 7 grupos oficiales.\n\n"
+        "Pulsa el botón para continuar de forma privada."
+    )
+
     # Primero enviamos el aviso para obtener su message_id.
     aviso = await context.bot.send_message(
         chat_id=chat_id,
-        text=(
-            "🔒 <b>MEMBRESÍA PENDIENTE</b>\n\n"
-            "Para participar debes completar tu membresía en los 7 grupos oficiales.\n\n"
-            "Pulsa el botón para continuar de forma privada."
-        ),
+        text=texto_aviso,
         parse_mode="HTML",
     )
 
-    # El payload permite que @UnionMembresia_bot sepa exactamente
-    # qué aviso del grupo debe borrar cuando recibe /start.
+    # El payload identifica el aviso exacto que originó el acceso.
     payload = f"m_{chat_id}_{aviso.message_id}_{user_id}"
     enlace_union = (
         f"https://t.me/{UNION_BOT_USERNAME}?start={payload}"
@@ -561,7 +651,7 @@ async def maximo_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ MaximoControlGroup operativo\n"
         "🔐 Membresía: 7/7 activa\n"
         "🌐 Moderación: 7 grupos oficiales + @Orma_Pruebas\n"
-        "🚫 Castigos/baneos: desactivados\n"
+        "🌐 Regla 7/7: usuarios, administradores y bots externos\n"        "✅ Bots oficiales: excluidos de raíz\n"        "🚫 Castigos/baneos: desactivados\n"
         "🛡️ Control publicitario general: pendiente"
     )
 
@@ -583,8 +673,9 @@ async def control_membresia_grupos(
     ):
         return
 
-    # Los bots tendrán reglas de publicidad propias en un bloque posterior.
-    if usuario.is_bot:
+    # ÚNICA EXCEPCIÓN: bots oficiales definidos de raíz.
+    # Todo lo demás (usuarios, administradores y bots externos) cumple 7/7.
+    if es_bot_oficial_exento(usuario):
         return
 
     registrar_usuario_membresia(usuario)
@@ -616,7 +707,8 @@ async def control_membresia_grupos(
     await mostrar_aviso_union_temporal(
         context=context,
         chat_id=chat.id,
-        user_id=usuario.id,
+        usuario=usuario,
+        estado=estado,
     )
 
 
@@ -820,7 +912,8 @@ async def main():
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")
     logging.info("Membresía obligatoria configurada: 7/7.")
-    logging.info("Moderación 7/7 activa en los 7 grupos oficiales.")
+    logging.info("Regla 7/7 universal activa en los 7 grupos oficiales.")
+    logging.info("Bots oficiales exentos de raíz: %s", sorted(BOTS_OFICIALES_EXENTOS))
     logging.info("@%s permanece como laboratorio de pruebas.", GRUPO_PRUEBAS_USERNAME)
 
     try:

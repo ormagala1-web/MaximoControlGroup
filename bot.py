@@ -1352,6 +1352,49 @@ def texto_separacion(segundos):
     return f"{segundos} s"
 
 
+def resumen_tipos_controlados(cfg):
+    pares = [
+        ("Foto", "controlar_foto"),
+        ("Video", "controlar_video"),
+        ("GIF", "controlar_gif"),
+        ("Documento", "controlar_documento"),
+        ("Enlace", "controlar_enlace"),
+        ("Custom emoji", "controlar_custom_emoji"),
+    ]
+    activos = [nombre for nombre, campo in pares if bool(cfg[campo])]
+    libres = [nombre for nombre, campo in pares if not bool(cfg[campo])]
+    return activos, libres
+
+
+def proxima_disponibilidad_separacion(identidad_tipo, identidad_id, cfg):
+    separacion = cfg["separacion_segundos"]
+    if separacion is None or int(separacion) <= 0:
+        return None
+
+    ultima = ultima_publicidad_permitida_db(identidad_tipo, identidad_id)
+    if not ultima:
+        return None
+
+    try:
+        fecha = datetime.fromisoformat(ultima)
+        if fecha.tzinfo is None:
+            fecha = fecha.replace(tzinfo=timezone.utc)
+        disponible = fecha + timedelta(seconds=int(separacion))
+        if disponible > datetime.now(timezone.utc):
+            return disponible
+    except (TypeError, ValueError):
+        return None
+
+    return None
+
+
+def captura_pertenece_propietario(captura, propietario_id):
+    return bool(
+        captura
+        and int(captura["propietario_id"]) == int(propietario_id)
+    )
+
+
 def teclado_control_publicidad(captura_id, cfg):
     modo = str(cfg["modo"] or "HEREDADO").upper()
 
@@ -1412,26 +1455,73 @@ async def texto_control_publicidad(captura):
         captura["objetivo_tipo"],
         captura["objetivo_id"],
     )
+    ritmo = resumen_frecuencia_publicidad_db(
+        captura["objetivo_tipo"],
+        captura["objetivo_id"],
+    )
+    ritmo_txt = texto_ritmo_publicitario(ritmo)
+    activos, libres = resumen_tipos_controlados(cfg)
+    disponible = proxima_disponibilidad_separacion(
+        captura["objetivo_tipo"],
+        captura["objetivo_id"],
+        cfg,
+    )
+
+    modo = str(cfg["modo"] or "HEREDADO").upper()
+    if modo == "HEREDADO":
+        efecto = "Usará la regla general cuando el módulo global esté activo"
+    elif modo == "PERSONALIZADO":
+        efecto = "Aplica separación, límites y tipos propios"
+    elif modo == "ILIMITADO":
+        efecto = "Registra publicidad, pero no la limita"
+    elif modo == "BLOQUEADO":
+        efecto = "Elimina toda publicidad controlable"
+    else:
+        efecto = "Fuera del Control Publicitario Individual"
+
+    proxima = (
+        formatear_fecha_peru(disponible.isoformat())
+        if disponible is not None
+        else "Disponible ahora / no aplica"
+    )
 
     return (
-        "📣 <b>CONTROL PUBLICITARIO INDIVIDUAL</b>\\n\\n"
-        f"👤 <b>{captura['objetivo_nombre'] or 'Sin nombre'}</b>\\n"
-        f"🆔 <code>{captura['objetivo_id']}</code>\\n\\n"
-        f"⚙️ Modo: <b>{cfg['modo']}</b>\\n"
-        f"⏱ Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>\\n\\n"
-        "🔢 <b>Límites personalizados</b>\\n"
-        f"• Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b>\\n"
-        f"• Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b>\\n"
-        f"• Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b>\\n"
-        f"• Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b>\\n"
-        f"• Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b>\\n\\n"
-        "📊 <b>Uso registrado</b>\\n"
-        f"• Última hora: <b>{uso['hora']}</b>\\n"
-        f"• Hoy: <b>{uso['dia']}</b>\\n"
-        f"• Semana: <b>{uso['semana']}</b>\\n"
-        f"• Mes: <b>{uso['mes']}</b>\\n"
-        f"• Año: <b>{uso['anio']}</b>\\n\\n"
-        "💬 El texto normal puro permanece libre."
+        "📣 <b>CONTROL PUBLICITARIO INDIVIDUAL</b>\n\n"
+        f"👤 <b>{captura['objetivo_nombre'] or 'Sin nombre'}</b>\n"
+        f"🆔 <code>{captura['objetivo_id']}</code>\n"
+        f"🏷️ Tipo: <b>{captura['objetivo_tipo']}</b>\n\n"
+
+        "⚙️ <b>ESTADO DEL CONTROL</b>\n"
+        f"• Modo: <b>{modo}</b>\n"
+        f"• Efecto: <b>{efecto}</b>\n"
+        f"• Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>\n"
+        f"• Próxima por separación: <b>{proxima}</b>\n\n"
+
+        "🔢 <b>LÍMITES PERSONALIZADOS</b>\n"
+        f"• Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b> "
+        f"· usados {uso['hora']}\n"
+        f"• Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b> "
+        f"· usados {uso['dia']}\n"
+        f"• Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b> "
+        f"· usados {uso['semana']}\n"
+        f"• Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b> "
+        f"· usados {uso['mes']}\n"
+        f"• Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b> "
+        f"· usados {uso['anio']}\n\n"
+
+        "🎛 <b>TIPOS</b>\n"
+        f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>\n"
+        f"• Libres por excepción: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>\n"
+        "• Texto normal puro: <b>SIEMPRE LIBRE</b>\n\n"
+
+        "📊 <b>COMPORTAMIENTO OBSERVADO</b>\n"
+        f"• Publicidad última hora: <b>{ritmo['ultima_hora']}</b>\n"
+        f"• Últimas 24 h: <b>{ritmo['ultimas_24h']}</b>\n"
+        f"• Frecuencia: <b>{ritmo_txt['frecuencia']}</b>\n"
+        f"• Última publicidad: "
+        f"<b>{formatear_fecha_peru(ritmo['ultima_publicidad'])}</b>\n\n"
+
+        "Selecciona qué deseas modificar."
     )
 
 
@@ -2247,6 +2337,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data or ""
 
     if data == "orma_cerrar":
+        ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
         await query.answer()
         try:
             await query.message.delete()
@@ -2257,6 +2348,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "orma_menu_principal":
+        ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
         await query.answer()
         try:
             await query.edit_message_text(
@@ -2276,6 +2368,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("orma_ficha:"):
+        ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
         try:
             captura_id = int(data.split(":", 1)[1])
         except ValueError:
@@ -2611,6 +2704,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, captura_txt, modo = data.split(":", 2)
         captura_id = int(captura_txt)
         captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
 
         actualizar_control_identidad_db(
             captura["objetivo_tipo"],
@@ -2639,7 +2735,10 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("SIN SEPARACIÓN", callback_data=f"orma_pub_setsep:{captura_id}:none"),
+                    InlineKeyboardButton(
+                        "SIN SEPARACIÓN",
+                        callback_data=f"orma_pub_setsep:{captura_id}:none",
+                    ),
                 ],
                 [
                     InlineKeyboardButton("5 min", callback_data=f"orma_pub_setsep:{captura_id}:300"),
@@ -2662,6 +2761,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, captura_txt, valor = data.split(":", 2)
         captura_id = int(captura_txt)
         captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
         segundos = None if valor == "none" else int(valor)
 
         actualizar_control_identidad_db(
@@ -2785,6 +2887,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, captura_txt, campo = data.split(":", 2)
         captura_id = int(captura_txt)
         captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
         cfg = obtener_control_identidad_db(
             captura["objetivo_tipo"],
             captura["objetivo_id"],
@@ -2836,6 +2941,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("orma_pub_reset:"):
         captura_id = int(data.split(":", 1)[1])
         captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
         resetear_control_identidad_db(
             captura["objetivo_tipo"],
             captura["objetivo_id"],

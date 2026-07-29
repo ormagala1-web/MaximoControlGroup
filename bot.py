@@ -63,6 +63,10 @@ UNION_APP_REF = None
 # Clave: (chat_id, user_id) -> message_id
 AVISOS_MEMBRESIA_ACTIVOS = {}
 
+# Panel privado reutilizable para las capturas /orma.
+PANELES_ORMA = {}
+CAPTURAS_ORMA = {}
+
 
 def conectar_db():
     conexion = sqlite3.connect(DATABASE_PATH)
@@ -99,6 +103,25 @@ def inicializar_base_datos():
             conexion.execute(
                 "ALTER TABLE usuarios_membresia ADD COLUMN union_panel_message_id INTEGER"
             )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS capturas_orma (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                propietario_id INTEGER NOT NULL,
+                objetivo_tipo TEXT NOT NULL,
+                objetivo_id INTEGER NOT NULL,
+                objetivo_username TEXT,
+                objetivo_nombre TEXT,
+                objetivo_es_bot INTEGER NOT NULL DEFAULT 0,
+                chat_id INTEGER NOT NULL,
+                chat_username TEXT,
+                chat_nombre TEXT,
+                mensaje_origen_id INTEGER NOT NULL,
+                fecha_captura TEXT NOT NULL
+            )
+            """
+        )
 
         conexion.execute(
             """
@@ -620,6 +643,260 @@ async def mostrar_aviso_union_temporal(
     )
 
 
+
+def guardar_captura_orma(propietario_id, objetivo_tipo, objetivo_id,
+                         objetivo_username, objetivo_nombre, objetivo_es_bot,
+                         chat, mensaje_origen_id):
+    ahora = datetime.now(timezone.utc).isoformat()
+    with conectar_db() as conexion:
+        cursor = conexion.execute(
+            """
+            INSERT INTO capturas_orma (
+                propietario_id, objetivo_tipo, objetivo_id,
+                objetivo_username, objetivo_nombre, objetivo_es_bot,
+                chat_id, chat_username, chat_nombre,
+                mensaje_origen_id, fecha_captura
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                propietario_id, objetivo_tipo, objetivo_id,
+                objetivo_username, objetivo_nombre,
+                1 if objetivo_es_bot else 0,
+                chat.id, getattr(chat, "username", None),
+                getattr(chat, "title", None),
+                mensaje_origen_id, ahora,
+            ),
+        )
+        captura_id = cursor.lastrowid
+        conexion.commit()
+    return captura_id
+
+
+def obtener_captura_orma(captura_id):
+    with conectar_db() as conexion:
+        return conexion.execute(
+            "SELECT * FROM capturas_orma WHERE id = ?",
+            (captura_id,),
+        ).fetchone()
+
+
+def teclado_ficha_orma(captura_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔐 MEMBRESÍA", callback_data=f"orma_membresia:{captura_id}"),
+            InlineKeyboardButton("📣 PUBLICIDAD", callback_data=f"orma_publicidad:{captura_id}"),
+        ],
+        [
+            InlineKeyboardButton("📊 ACTIVIDAD", callback_data=f"orma_actividad:{captura_id}"),
+            InlineKeyboardButton("🚪 ENTRADAS / SALIDAS", callback_data=f"orma_movimientos:{captura_id}"),
+        ],
+        [
+            InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+        ],
+    ])
+
+
+async def construir_texto_ficha_orma(captura):
+    objetivo_id = captura["objetivo_id"]
+    username = f"@{captura['objetivo_username']}" if captura["objetivo_username"] else "Sin @username"
+    nombre = captura["objetivo_nombre"] or "Sin nombre visible"
+    rol = await obtener_rol_en_grupo(captura["chat_id"], objetivo_id)
+
+    if captura["objetivo_tipo"] in {"USUARIO", "BOT"}:
+        try:
+            estado = await obtener_estado_membresia_7de7(objetivo_id)
+            progreso = f"{len(estado['completados'])}/{estado['total']}"
+        except Exception:
+            logging.exception("Error obteniendo membresía para /orma objetivo=%s", objetivo_id)
+            progreso = "No disponible"
+    else:
+        progreso = "No aplica"
+
+    oficial = (
+        captura["objetivo_tipo"] == "BOT"
+        and (captura["objetivo_username"] or "").lower() in BOTS_OFICIALES_EXENTOS
+    )
+    oficial_txt = "\n✅ <b>Bot oficial:</b> EXENTO DE RAÍZ" if oficial else ""
+
+    return (
+        "🛡️ <b>FICHA DE CONTROL /ORMA</b>\n\n"
+        f"👤 <b>Nombre:</b> {nombre}\n"
+        f"🔗 <b>Usuario:</b> {username}\n"
+        f"🆔 <b>ID:</b> <code>{objetivo_id}</code>\n"
+        f"🏷️ <b>Tipo:</b> {captura['objetivo_tipo']}\n"
+        f"🛡️ <b>Rol:</b> {rol}\n"
+        f"🔐 <b>Membresía:</b> {progreso}{oficial_txt}\n\n"
+        f"📍 <b>Grupo origen:</b> {captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']}\n"
+        f"💬 <b>Mensaje origen:</b> <code>{captura['mensaje_origen_id']}</code>\n"
+        f"🕐 <b>Capturado:</b> {captura['fecha_captura']}\n\n"
+        "Expediente base preparado. Las herramientas avanzadas se activarán por bloques."
+    )
+
+
+async def mostrar_ficha_orma_privada(bot, propietario_id, captura_id):
+    captura = obtener_captura_orma(captura_id)
+    if not captura or captura["propietario_id"] != propietario_id:
+        return False
+
+    texto = await construir_texto_ficha_orma(captura)
+    panel_id = PANELES_ORMA.get(propietario_id)
+
+    if panel_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=propietario_id,
+                message_id=panel_id,
+                text=texto,
+                parse_mode="HTML",
+                reply_markup=teclado_ficha_orma(captura_id),
+            )
+            return True
+        except TelegramError as error:
+            if "message is not modified" in str(error).lower():
+                return True
+
+    try:
+        enviado = await bot.send_message(
+            chat_id=propietario_id,
+            text=texto,
+            parse_mode="HTML",
+            reply_markup=teclado_ficha_orma(captura_id),
+        )
+        PANELES_ORMA[propietario_id] = enviado.message_id
+        return True
+    except TelegramError:
+        logging.exception("No se pudo abrir ficha /orma para %s", propietario_id)
+        return False
+
+
+async def orma_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mensaje = update.effective_message
+    ejecutor = update.effective_user
+    chat = update.effective_chat
+
+    if (
+        not mensaje or not ejecutor or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not es_grupo_controlado(chat)
+    ):
+        return
+
+    # /orma nunca queda visible.
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        logging.exception("No se pudo eliminar /orma en chat=%s", chat.id)
+
+    origen = mensaje.reply_to_message
+    if origen is None:
+        return
+
+    objetivo = origen.from_user
+    sender_chat = origen.sender_chat
+
+    if objetivo is not None:
+        tipo = "BOT" if objetivo.is_bot else "USUARIO"
+        objetivo_id = objetivo.id
+        objetivo_username = objetivo.username
+        objetivo_nombre = nombre_visible_usuario(objetivo)
+        objetivo_es_bot = objetivo.is_bot
+        registrar_usuario_membresia(objetivo)
+    elif sender_chat is not None:
+        tipo = "CANAL/CHAT"
+        objetivo_id = sender_chat.id
+        objetivo_username = sender_chat.username
+        objetivo_nombre = sender_chat.title or "Sin nombre visible"
+        objetivo_es_bot = False
+    else:
+        return
+
+    captura_id = guardar_captura_orma(
+        ejecutor.id, tipo, objetivo_id, objetivo_username,
+        objetivo_nombre, objetivo_es_bot, chat, origen.message_id,
+    )
+    CAPTURAS_ORMA[ejecutor.id] = captura_id
+    await mostrar_ficha_orma_privada(context.bot, ejecutor.id, captura_id)
+
+
+async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    usuario = update.effective_user
+    if not query or not usuario:
+        return
+
+    data = query.data or ""
+
+    if data == "orma_cerrar":
+        await query.answer()
+        try:
+            await query.message.delete()
+        except TelegramError:
+            pass
+        PANELES_ORMA.pop(usuario.id, None)
+        return
+
+    if data == "orma_menu_principal":
+        await query.answer()
+        try:
+            await query.edit_message_text(
+                "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
+                "Panel administrativo.\n\n"
+                "Usa <code>/orma</code> respondiendo un mensaje en un grupo controlado.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
+                ]]),
+            )
+        except TelegramError:
+            pass
+        return
+
+    if data.startswith("orma_ficha:"):
+        try:
+            captura_id = int(data.split(":", 1)[1])
+        except ValueError:
+            await query.answer()
+            return
+        await query.answer()
+        await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id)
+        return
+
+    pendientes = {
+        "orma_membresia:": "🔐 MEMBRESÍA",
+        "orma_publicidad:": "📣 CONTROL PUBLICITARIO",
+        "orma_actividad:": "📊 ACTIVIDAD",
+        "orma_movimientos:": "🚪 ENTRADAS / SALIDAS",
+    }
+
+    for prefijo, titulo in pendientes.items():
+        if data.startswith(prefijo):
+            try:
+                captura_id = int(data.split(":", 1)[1])
+            except ValueError:
+                await query.answer()
+                return
+
+            captura = obtener_captura_orma(captura_id)
+            if not captura or captura["propietario_id"] != usuario.id:
+                await query.answer("Ficha no disponible.", show_alert=True)
+                return
+
+            await query.answer()
+            await query.edit_message_text(
+                f"{titulo}\n\n"
+                "Esta herramienta se activará en el bloque correspondiente.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")],
+                    [
+                        InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+                        InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+                    ],
+                ]),
+            )
+            return
+
+
 # =========================================================
 # BOT MODERADOR: @MaximoControlGroup_bot
 # =========================================================
@@ -634,12 +911,43 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     registrar_usuario_membresia(usuario)
 
     if update.effective_chat and update.effective_chat.type == ChatType.PRIVATE:
-        await mensaje.reply_text(
-            "🛡️ MAXIMO CONTROL GROUP\n\n"
-            "Bot moderador conectado correctamente.\n\n"
-            "Membresía 7/7 activa en los 7 grupos oficiales.\n"
-            "@Orma_Pruebas continúa habilitado como laboratorio."
+        try:
+            await mensaje.delete()
+        except TelegramError:
+            pass
+
+        texto = (
+            "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
+            "Panel administrativo.\n\n"
+            "Usa <code>/orma</code> respondiendo un mensaje "
+            "en cualquiera de los grupos controlados."
         )
+        teclado = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
+        ]])
+
+        panel_id = PANELES_ORMA.get(usuario.id)
+        if panel_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=usuario.id,
+                    message_id=panel_id,
+                    text=texto,
+                    parse_mode="HTML",
+                    reply_markup=teclado,
+                )
+                return
+            except TelegramError as error:
+                if "message is not modified" in str(error).lower():
+                    return
+
+        enviado = await context.bot.send_message(
+            chat_id=usuario.id,
+            text=texto,
+            parse_mode="HTML",
+            reply_markup=teclado,
+        )
+        PANELES_ORMA[usuario.id] = enviado.message_id
 
 
 async def maximo_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -889,6 +1197,10 @@ async def main():
 
     maximo_app.add_handler(CommandHandler("start", maximo_start))
     maximo_app.add_handler(CommandHandler("estado", maximo_estado))
+    maximo_app.add_handler(CommandHandler("orma", orma_comando))
+    maximo_app.add_handler(
+        CallbackQueryHandler(orma_callback, pattern=r"^orma_")
+    )
     maximo_app.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS & ~filters.COMMAND,

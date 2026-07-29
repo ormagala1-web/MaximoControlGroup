@@ -45,6 +45,10 @@ GRUPOS_OFICIALES = [
 MAXIMO_APP_REF = None
 UNION_APP_REF = None
 
+# Un solo aviso temporal por usuario y grupo.
+# Clave: (chat_id, user_id) -> message_id
+AVISOS_MEMBRESIA_ACTIVOS = {}
+
 
 def conectar_db():
     conexion = sqlite3.connect(DATABASE_PATH)
@@ -417,15 +421,66 @@ def es_grupo_controlado(chat):
     )
 
 
-async def mostrar_aviso_union_temporal(mensaje):
+async def eliminar_aviso_membresia_programado(
+    bot,
+    chat_id,
+    user_id,
+    message_id,
+    segundos,
+):
+    try:
+        await asyncio.sleep(segundos)
+
+        clave = (chat_id, user_id)
+        actual = AVISOS_MEMBRESIA_ACTIVOS.get(clave)
+
+        # Solo borra el aviso que siga siendo el vigente para ese usuario/grupo.
+        if actual != message_id:
+            return
+
+        try:
+            await bot.delete_message(
+                chat_id=chat_id,
+                message_id=message_id,
+            )
+        except TelegramError:
+            pass
+
+        AVISOS_MEMBRESIA_ACTIVOS.pop(clave, None)
+
+    except asyncio.CancelledError:
+        pass
+
+
+async def mostrar_aviso_union_temporal(
+    context,
+    chat_id,
+    user_id,
+):
     enlace_union = (
         f"https://t.me/{UNION_BOT_USERNAME}?start=membresia"
     )
 
-    aviso = await mensaje.reply_text(
-        "🔒 <b>MEMBRESÍA PENDIENTE</b>\n\n"
-        "Para participar debes completar tu membresía en los 7 grupos oficiales.\n\n"
-        "Pulsa el botón para continuar de forma privada.",
+    clave = (chat_id, user_id)
+    anterior_id = AVISOS_MEMBRESIA_ACTIVOS.get(clave)
+
+    # Evita acumular avisos si el usuario insiste varias veces.
+    if anterior_id:
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=anterior_id,
+            )
+        except TelegramError:
+            pass
+
+    aviso = await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "🔒 <b>MEMBRESÍA PENDIENTE</b>\n\n"
+            "Para participar debes completar tu membresía en los 7 grupos oficiales.\n\n"
+            "Pulsa el botón para continuar de forma privada."
+        ),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
             [
@@ -439,9 +494,14 @@ async def mostrar_aviso_union_temporal(mensaje):
         ),
     )
 
+    AVISOS_MEMBRESIA_ACTIVOS[clave] = aviso.message_id
+
     asyncio.create_task(
-        eliminar_mensaje_despues(
-            aviso,
+        eliminar_aviso_membresia_programado(
+            context.bot,
+            chat_id,
+            user_id,
+            aviso.message_id,
             AVISO_MEMBRESIA_SEGUNDOS,
         )
     )
@@ -526,10 +586,15 @@ async def control_membresia_grupos(
     )
 
     if union_iniciado:
+        # Mantiene actualizado su panel privado, pero el aviso del grupo
+        # también aparece durante 2 minutos según la regla 7/7 definida.
         await mostrar_o_actualizar_panel_union(usuario.id)
-        return
 
-    await mostrar_aviso_union_temporal(mensaje)
+    await mostrar_aviso_union_temporal(
+        context=context,
+        chat_id=chat.id,
+        user_id=usuario.id,
+    )
 
 
 # =========================================================

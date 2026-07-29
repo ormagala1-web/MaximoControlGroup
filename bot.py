@@ -1060,6 +1060,209 @@ def resumen_uso_publicidad_db(identidad_tipo, identidad_id):
     }
 
 
+def formatear_intervalo_segundos(segundos):
+    if segundos is None:
+        return "No disponible"
+
+    try:
+        segundos = int(round(float(segundos)))
+    except (TypeError, ValueError):
+        return "No disponible"
+
+    if segundos < 60:
+        return f"{segundos} s"
+
+    minutos = segundos // 60
+
+    if minutos < 60:
+        return f"{minutos} min"
+
+    horas, minutos_restantes = divmod(minutos, 60)
+
+    if horas < 24:
+        if minutos_restantes:
+            return f"{horas} h {minutos_restantes} min"
+        return f"{horas} h"
+
+    dias, horas_restantes = divmod(horas, 24)
+
+    if horas_restantes:
+        return f"{dias} d {horas_restantes} h"
+
+    return f"{dias} d"
+
+
+def resumen_frecuencia_publicidad_db(
+    identidad_tipo,
+    identidad_id,
+    max_eventos=20,
+):
+    """
+    Analiza intentos/publicaciones que el motor clasificó como publicidad.
+    Incluye permitidas y rechazadas para reflejar el comportamiento real
+    de la identidad, no solamente lo que finalmente quedó visible.
+    """
+    ahora = datetime.now(timezone.utc)
+    desde_hora = (ahora - timedelta(hours=1)).isoformat()
+    desde_24h = (ahora - timedelta(hours=24)).isoformat()
+    inicio_dia_peru = datetime.now(ZONA_PERU).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    ).astimezone(timezone.utc).isoformat()
+
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS ultima_hora,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS ultimas_24h,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS hoy,
+                SUM(
+                    CASE
+                        WHEN fecha_evento >= ? AND decision = 'PERMITIDA'
+                        THEN 1 ELSE 0
+                    END
+                ) AS permitidas_hora,
+                SUM(
+                    CASE
+                        WHEN fecha_evento >= ? AND decision <> 'PERMITIDA'
+                        THEN 1 ELSE 0
+                    END
+                ) AS rechazadas_hora,
+                MAX(fecha_evento) AS ultima_publicidad
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            """,
+            (
+                desde_hora,
+                desde_24h,
+                inicio_dia_peru,
+                desde_hora,
+                desde_hora,
+                identidad_tipo,
+                identidad_id,
+            ),
+        ).fetchone()
+
+        eventos = conexion.execute(
+            """
+            SELECT fecha_evento, decision, tipo_contenido
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            ORDER BY fecha_evento DESC
+            LIMIT ?
+            """,
+            (
+                identidad_tipo,
+                identidad_id,
+                int(max_eventos),
+            ),
+        ).fetchall()
+
+        grupos_hora = conexion.execute(
+            """
+            SELECT
+                COALESCE(
+                    chat_nombre,
+                    chat_username,
+                    CAST(chat_id AS TEXT)
+                ) AS grupo,
+                COUNT(*) AS total
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND fecha_evento >= ?
+            GROUP BY chat_id
+            ORDER BY total DESC, grupo ASC
+            """,
+            (
+                identidad_tipo,
+                identidad_id,
+                desde_hora,
+            ),
+        ).fetchall()
+
+    fechas = []
+
+    for evento in reversed(eventos):
+        try:
+            fecha = datetime.fromisoformat(evento["fecha_evento"])
+            if fecha.tzinfo is None:
+                fecha = fecha.replace(tzinfo=timezone.utc)
+            fechas.append(fecha.astimezone(timezone.utc))
+        except (TypeError, ValueError):
+            continue
+
+    intervalos = []
+
+    for anterior, actual in zip(fechas, fechas[1:]):
+        segundos = (actual - anterior).total_seconds()
+        if segundos >= 0:
+            intervalos.append(segundos)
+
+    promedio_segundos = (
+        sum(intervalos) / len(intervalos)
+        if intervalos
+        else None
+    )
+
+    ultimo_intervalo = (
+        intervalos[-1]
+        if intervalos
+        else None
+    )
+
+    ultima_hora = int((fila["ultima_hora"] or 0) if fila else 0)
+    ultimas_24h = int((fila["ultimas_24h"] or 0) if fila else 0)
+    hoy = int((fila["hoy"] or 0) if fila else 0)
+
+    # Promedio equivalente de publicaciones por hora en las últimas 24 h.
+    promedio_por_hora_24h = round(ultimas_24h / 24, 2)
+
+    return {
+        "ultima_hora": ultima_hora,
+        "ultimas_24h": ultimas_24h,
+        "hoy": hoy,
+        "permitidas_hora": int(
+            (fila["permitidas_hora"] or 0) if fila else 0
+        ),
+        "rechazadas_hora": int(
+            (fila["rechazadas_hora"] or 0) if fila else 0
+        ),
+        "ultima_publicidad": (
+            fila["ultima_publicidad"] if fila else None
+        ),
+        "promedio_intervalo_segundos": promedio_segundos,
+        "ultimo_intervalo_segundos": ultimo_intervalo,
+        "promedio_por_hora_24h": promedio_por_hora_24h,
+        "muestra_intervalos": len(intervalos),
+        "grupos_hora": grupos_hora,
+    }
+
+
+def texto_ritmo_publicitario(resumen):
+    if resumen["muestra_intervalos"] <= 0:
+        frecuencia = "Aún sin muestra suficiente"
+        ultimo_intervalo = "No disponible"
+    else:
+        frecuencia = (
+            "1 cada "
+            f"{formatear_intervalo_segundos(resumen['promedio_intervalo_segundos'])}"
+        )
+        ultimo_intervalo = formatear_intervalo_segundos(
+            resumen["ultimo_intervalo_segundos"]
+        )
+
+    return {
+        "frecuencia": frecuencia,
+        "ultimo_intervalo": ultimo_intervalo,
+    }
+
+
 def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
     cfg = obtener_control_identidad_db(identidad_tipo, identidad_id)
     modo = str(cfg["modo"] or "HEREDADO").upper()
@@ -1733,6 +1936,10 @@ def obtener_resumen_identidad_orma(objetivo_tipo, objetivo_id):
             if publicidad and publicidad["bloqueadas"]
             else 0
         ),
+        "ritmo_publicidad": resumen_frecuencia_publicidad_db(
+            objetivo_tipo,
+            objetivo_id,
+        ),
         "entradas": movimientos["entradas"],
         "salidas": movimientos["salidas"],
         "primera_entrada": movimientos["primera_entrada"],
@@ -1915,7 +2122,14 @@ async def construir_texto_ficha_orma(captura):
         "📣 <b>PUBLICIDAD REGISTRADA</b>\n"
         f"• Total evaluada: <b>{resumen['publicidad_total']}</b>\n"
         f"• Permitida: <b>{resumen['publicidad_permitida']}</b>\n"
-        f"• Rechazada/controlada: <b>{resumen['publicidad_bloqueada']}</b>\n\n"
+        f"• Rechazada/controlada: <b>{resumen['publicidad_bloqueada']}</b>\n"
+        f"• Última hora: <b>{resumen['ritmo_publicidad']['ultima_hora']}</b> "
+        f"(✅ {resumen['ritmo_publicidad']['permitidas_hora']} · "
+        f"⛔ {resumen['ritmo_publicidad']['rechazadas_hora']})\n"
+        f"• Últimas 24 h: <b>{resumen['ritmo_publicidad']['ultimas_24h']}</b>\n"
+        f"• Ritmo promedio: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['frecuencia']}</b>\n"
+        f"• Último intervalo: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['ultimo_intervalo']}</b>\n"
+        f"• Última publicidad: <b>{formatear_fecha_peru(resumen['ritmo_publicidad']['ultima_publicidad'])}</b>\n\n"
 
         "🚪 <b>MOVIMIENTOS OBSERVADOS</b>\n"
         f"• Entradas: <b>{resumen['entradas']}</b>\n"
@@ -2165,10 +2379,39 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             lineas.append("• Sin actividad registrada todavía.")
 
+        ritmo_pub = resumen_frecuencia_publicidad_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+        )
+        ritmo_txt = texto_ritmo_publicitario(ritmo_pub)
+
         lineas.extend([
             "",
-            "ℹ️ El historial comienza desde la activación de este bloque; "
-            "no reconstruye mensajes anteriores.",
+            "📣 <b>Ritmo publicitario observado</b>",
+            f"• Última hora: <b>{ritmo_pub['ultima_hora']}</b>",
+            f"• Permitidas última hora: <b>{ritmo_pub['permitidas_hora']}</b>",
+            f"• Rechazadas última hora: <b>{ritmo_pub['rechazadas_hora']}</b>",
+            f"• Últimas 24 h: <b>{ritmo_pub['ultimas_24h']}</b>",
+            f"• Promedio equivalente / hora (24 h): "
+            f"<b>{ritmo_pub['promedio_por_hora_24h']}</b>",
+            f"• Frecuencia promedio: <b>{ritmo_txt['frecuencia']}</b>",
+            f"• Último intervalo: <b>{ritmo_txt['ultimo_intervalo']}</b>",
+            f"• Última publicidad: "
+            f"<b>{formatear_fecha_peru(ritmo_pub['ultima_publicidad'])}</b>",
+        ])
+
+        if ritmo_pub["grupos_hora"]:
+            lineas.extend(["", "📍 <b>Publicidad por grupo · última hora</b>"])
+            for fila in ritmo_pub["grupos_hora"][:7]:
+                lineas.append(
+                    f"• {fila['grupo']}: <b>{fila['total']}</b>"
+                )
+
+        lineas.extend([
+            "",
+            "ℹ️ La frecuencia se calcula con publicidad detectada por "
+            "Máximo Control, incluida la que haya sido rechazada por reglas. "
+            "El historial empieza desde que el sistema registra estos eventos.",
         ])
 
         await query.edit_message_text(
@@ -2251,10 +2494,35 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 lineas.append("• Sin movimientos registrados todavía.")
 
+            # Dato de seguimiento útil sin inventar historial anterior.
+            if resumen["ultima_entrada"] and not resumen["ultima_salida"]:
+                estado_mov = "🟢 Último movimiento registrado: ENTRADA"
+            elif resumen["ultima_salida"] and not resumen["ultima_entrada"]:
+                estado_mov = "🔴 Último movimiento registrado: SALIDA"
+            elif resumen["ultima_entrada"] and resumen["ultima_salida"]:
+                try:
+                    fe = datetime.fromisoformat(resumen["ultima_entrada"])
+                    fs = datetime.fromisoformat(resumen["ultima_salida"])
+                    if fe.tzinfo is None:
+                        fe = fe.replace(tzinfo=timezone.utc)
+                    if fs.tzinfo is None:
+                        fs = fs.replace(tzinfo=timezone.utc)
+                    estado_mov = (
+                        "🟢 Último movimiento registrado: ENTRADA"
+                        if fe > fs
+                        else "🔴 Último movimiento registrado: SALIDA"
+                    )
+                except (TypeError, ValueError):
+                    estado_mov = "⚪ Último movimiento: No disponible"
+            else:
+                estado_mov = "⚪ Sin movimientos observados todavía"
+
             lineas.extend([
                 "",
+                f"<b>{estado_mov}</b>",
+                "",
                 "ℹ️ Solo se contabilizan movimientos observados desde "
-                "la activación de este registro.",
+                "la activación de este registro; no se inventa historial anterior.",
             ])
 
         await query.edit_message_text(

@@ -28,7 +28,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
 
 TOTAL_GRUPOS_OBLIGATORIOS = 7
-AVISO_MEMBRESIA_SEGUNDOS = 120
+AVISO_MEMBRESIA_SEGUNDOS = 60
 UNION_BOT_USERNAME = "UnionMembresia_bot"
 GRUPO_PRUEBAS_USERNAME = "Orma_Pruebas"
 
@@ -376,8 +376,22 @@ async def mostrar_o_actualizar_panel_union(user_id):
                 reply_markup=teclado,
             )
             return True
-        except TelegramError:
-            pass
+
+        except TelegramError as error:
+            # Telegram devuelve "Message is not modified" cuando el panel
+            # ya contiene exactamente el estado actual. Eso NO significa
+            # que el panel esté perdido, así que no debemos crear otro.
+            if "message is not modified" in str(error).lower():
+                return True
+
+            # Para cualquier otro error (por ejemplo, el usuario borró
+            # manualmente el panel), se crea uno nuevo más abajo.
+            logging.info(
+                "No se pudo editar panel privado user=%s, message_id=%s: %s",
+                user_id,
+                message_id,
+                error,
+            )
 
     try:
         enviado = await UNION_APP_REF.bot.send_message(
@@ -457,10 +471,6 @@ async def mostrar_aviso_union_temporal(
     chat_id,
     user_id,
 ):
-    enlace_union = (
-        f"https://t.me/{UNION_BOT_USERNAME}?start=membresia"
-    )
-
     clave = (chat_id, user_id)
     anterior_id = AVISOS_MEMBRESIA_ACTIVOS.get(clave)
 
@@ -474,6 +484,7 @@ async def mostrar_aviso_union_temporal(
         except TelegramError:
             pass
 
+    # Primero enviamos el aviso para obtener su message_id.
     aviso = await context.bot.send_message(
         chat_id=chat_id,
         text=(
@@ -482,6 +493,18 @@ async def mostrar_aviso_union_temporal(
             "Pulsa el botón para continuar de forma privada."
         ),
         parse_mode="HTML",
+    )
+
+    # El payload permite que @UnionMembresia_bot sepa exactamente
+    # qué aviso del grupo debe borrar cuando recibe /start.
+    payload = f"m_{chat_id}_{aviso.message_id}_{user_id}"
+    enlace_union = (
+        f"https://t.me/{UNION_BOT_USERNAME}?start={payload}"
+    )
+
+    await context.bot.edit_message_reply_markup(
+        chat_id=chat_id,
+        message_id=aviso.message_id,
         reply_markup=InlineKeyboardMarkup(
             [
                 [
@@ -597,6 +620,59 @@ async def control_membresia_grupos(
     )
 
 
+
+async def borrar_aviso_origen_desde_payload(
+    context,
+    usuario_id,
+):
+    """
+    Payload esperado:
+        m_<chat_id>_<message_id>_<user_id>
+
+    Solo borra el aviso si el deep-link pertenece al mismo usuario
+    que acaba de iniciar @UnionMembresia_bot.
+    """
+    if not context.args:
+        return
+
+    payload = context.args[0]
+
+    if not payload.startswith("m_"):
+        return
+
+    partes = payload.split("_")
+
+    if len(partes) != 4:
+        return
+
+    try:
+        chat_id = int(partes[1])
+        message_id = int(partes[2])
+        payload_user_id = int(partes[3])
+    except ValueError:
+        return
+
+    if payload_user_id != usuario_id:
+        return
+
+    if MAXIMO_APP_REF is None:
+        return
+
+    try:
+        await MAXIMO_APP_REF.bot.delete_message(
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+    except TelegramError:
+        # Puede haberse borrado ya por el temporizador de 60 segundos.
+        pass
+
+    clave = (chat_id, usuario_id)
+
+    if AVISOS_MEMBRESIA_ACTIVOS.get(clave) == message_id:
+        AVISOS_MEMBRESIA_ACTIVOS.pop(clave, None)
+
+
 # =========================================================
 # BOT PRIVADO: @UnionMembresia_bot
 # =========================================================
@@ -617,6 +693,13 @@ async def union_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     registrar_usuario_membresia(
         usuario,
         union_bot_iniciado=True,
+    )
+
+    # Si el usuario llegó desde el botón del aviso del grupo,
+    # eliminamos ese aviso inmediatamente al recibir el /start.
+    await borrar_aviso_origen_desde_payload(
+        context,
+        usuario.id,
     )
 
     try:
@@ -664,7 +747,15 @@ async def union_verificar_callback(
             usuario.id,
             query.message.message_id,
         )
-    except TelegramError:
+
+    except TelegramError as error:
+        if "message is not modified" in str(error).lower():
+            guardar_union_panel_message_id(
+                usuario.id,
+                query.message.message_id,
+            )
+            return
+
         await mostrar_o_actualizar_panel_union(usuario.id)
 
 

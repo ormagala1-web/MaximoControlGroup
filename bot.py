@@ -11,6 +11,7 @@ from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -105,6 +106,57 @@ def inicializar_base_datos():
             conexion.execute(
                 "ALTER TABLE usuarios_membresia ADD COLUMN union_panel_message_id INTEGER"
             )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS actividad_grupo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                identidad_tipo TEXT NOT NULL,
+                identidad_id INTEGER NOT NULL,
+                username TEXT,
+                nombre TEXT,
+                es_bot INTEGER NOT NULL DEFAULT 0,
+                chat_id INTEGER NOT NULL,
+                chat_username TEXT,
+                chat_nombre TEXT,
+                message_id INTEGER NOT NULL,
+                tipo_contenido TEXT NOT NULL,
+                contiene_enlace INTEGER NOT NULL DEFAULT 0,
+                fecha_evento TEXT NOT NULL,
+                UNIQUE(chat_id, message_id, identidad_tipo, identidad_id)
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_actividad_identidad_fecha
+            ON actividad_grupo (identidad_tipo, identidad_id, fecha_evento)
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS movimientos_grupo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                nombre TEXT,
+                chat_id INTEGER NOT NULL,
+                chat_username TEXT,
+                chat_nombre TEXT,
+                tipo_movimiento TEXT NOT NULL,
+                fecha_evento TEXT NOT NULL
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_movimientos_usuario_fecha
+            ON movimientos_grupo (user_id, fecha_evento)
+            """
+        )
 
         conexion.execute(
             """
@@ -656,6 +708,290 @@ async def mostrar_aviso_union_temporal(
 
 
 
+def limites_periodos_actividad():
+    ahora_local = datetime.now(ZONA_PERU)
+
+    inicio_hora = ahora_local - __import__("datetime").timedelta(hours=1)
+    inicio_dia = ahora_local.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    inicio_semana = inicio_dia - __import__("datetime").timedelta(
+        days=inicio_dia.weekday()
+    )
+    inicio_mes = inicio_dia.replace(day=1)
+
+    def utc_iso(fecha):
+        return fecha.astimezone(timezone.utc).isoformat()
+
+    return {
+        "hora": utc_iso(inicio_hora),
+        "dia": utc_iso(inicio_dia),
+        "semana": utc_iso(inicio_semana),
+        "mes": utc_iso(inicio_mes),
+    }
+
+
+def detectar_enlace_mensaje(mensaje):
+    entidades = list(getattr(mensaje, "entities", None) or [])
+    entidades += list(getattr(mensaje, "caption_entities", None) or [])
+
+    for entidad in entidades:
+        tipo = str(getattr(entidad, "type", "") or "").lower()
+        if tipo in {"url", "text_link"}:
+            return True
+
+    contenido = " ".join(
+        parte
+        for parte in [
+            getattr(mensaje, "text", None),
+            getattr(mensaje, "caption", None),
+        ]
+        if parte
+    )
+
+    return bool(
+        __import__("re").search(
+            r"(https?://|www\.|t\.me/|wa\.me/)",
+            contenido,
+            flags=__import__("re").IGNORECASE,
+        )
+    )
+
+
+def clasificar_contenido_mensaje(mensaje):
+    if getattr(mensaje, "photo", None):
+        return "FOTO"
+
+    if getattr(mensaje, "video", None):
+        return "VIDEO"
+
+    if getattr(mensaje, "animation", None):
+        return "GIF/ANIMACIÓN"
+
+    if getattr(mensaje, "document", None):
+        return "DOCUMENTO"
+
+    if getattr(mensaje, "audio", None):
+        return "AUDIO"
+
+    if getattr(mensaje, "voice", None):
+        return "VOZ"
+
+    if getattr(mensaje, "sticker", None):
+        return "STICKER"
+
+    if getattr(mensaje, "video_note", None):
+        return "VIDEO NOTA"
+
+    if detectar_enlace_mensaje(mensaje):
+        return "TEXTO + ENLACE"
+
+    if getattr(mensaje, "text", None):
+        return "TEXTO"
+
+    return "OTRO"
+
+
+def guardar_actividad_db(
+    identidad_tipo,
+    identidad_id,
+    username,
+    nombre,
+    es_bot,
+    chat,
+    message_id,
+    tipo_contenido,
+    contiene_enlace,
+):
+    ahora = datetime.now(timezone.utc).isoformat()
+
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            INSERT OR IGNORE INTO actividad_grupo (
+                identidad_tipo, identidad_id,
+                username, nombre, es_bot,
+                chat_id, chat_username, chat_nombre,
+                message_id, tipo_contenido,
+                contiene_enlace, fecha_evento
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                identidad_tipo,
+                int(identidad_id),
+                username,
+                nombre,
+                1 if es_bot else 0,
+                chat.id,
+                getattr(chat, "username", None),
+                getattr(chat, "title", None),
+                int(message_id),
+                tipo_contenido,
+                1 if contiene_enlace else 0,
+                ahora,
+            ),
+        )
+        conexion.commit()
+
+
+def resumen_actividad_db(identidad_tipo, identidad_id):
+    limites = limites_periodos_actividad()
+
+    with conectar_db() as conexion:
+        resultado = {}
+
+        for clave, inicio in limites.items():
+            fila = conexion.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM actividad_grupo
+                WHERE identidad_tipo = ?
+                  AND identidad_id = ?
+                  AND fecha_evento >= ?
+                """,
+                (identidad_tipo, identidad_id, inicio),
+            ).fetchone()
+
+            resultado[clave] = int(fila["total"] if fila else 0)
+
+        tipos = conexion.execute(
+            """
+            SELECT tipo_contenido, COUNT(*) AS total
+            FROM actividad_grupo
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND fecha_evento >= ?
+            GROUP BY tipo_contenido
+            ORDER BY total DESC, tipo_contenido ASC
+            """,
+            (
+                identidad_tipo,
+                identidad_id,
+                limites["mes"],
+            ),
+        ).fetchall()
+
+        grupos = conexion.execute(
+            """
+            SELECT
+                COALESCE(chat_nombre, chat_username, CAST(chat_id AS TEXT)) AS grupo,
+                COUNT(*) AS total
+            FROM actividad_grupo
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND fecha_evento >= ?
+            GROUP BY chat_id
+            ORDER BY total DESC
+            """,
+            (
+                identidad_tipo,
+                identidad_id,
+                limites["mes"],
+            ),
+        ).fetchall()
+
+    resultado["tipos_mes"] = tipos
+    resultado["grupos_mes"] = grupos
+    return resultado
+
+
+def guardar_movimiento_db(user, chat, tipo_movimiento):
+    ahora = datetime.now(timezone.utc).isoformat()
+    nombre = nombre_visible_usuario(user)
+
+    with conectar_db() as conexion:
+        # Evita duplicar el mismo cambio si Telegram entrega actualizaciones
+        # repetidas en un intervalo muy corto.
+        ultimo = conexion.execute(
+            """
+            SELECT tipo_movimiento, fecha_evento
+            FROM movimientos_grupo
+            WHERE user_id = ?
+              AND chat_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user.id, chat.id),
+        ).fetchone()
+
+        if ultimo and ultimo["tipo_movimiento"] == tipo_movimiento:
+            try:
+                fecha_ultimo = datetime.fromisoformat(ultimo["fecha_evento"])
+                if fecha_ultimo.tzinfo is None:
+                    fecha_ultimo = fecha_ultimo.replace(tzinfo=timezone.utc)
+                if (
+                    datetime.now(timezone.utc) - fecha_ultimo
+                ).total_seconds() < 10:
+                    return False
+            except (TypeError, ValueError):
+                pass
+
+        conexion.execute(
+            """
+            INSERT INTO movimientos_grupo (
+                user_id, username, nombre,
+                chat_id, chat_username, chat_nombre,
+                tipo_movimiento, fecha_evento
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user.id,
+                user.username,
+                nombre,
+                chat.id,
+                getattr(chat, "username", None),
+                getattr(chat, "title", None),
+                tipo_movimiento,
+                ahora,
+            ),
+        )
+        conexion.commit()
+
+    return True
+
+
+def resumen_movimientos_db(user_id):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT
+                SUM(CASE WHEN tipo_movimiento = 'ENTRADA' THEN 1 ELSE 0 END) AS entradas,
+                SUM(CASE WHEN tipo_movimiento = 'SALIDA' THEN 1 ELSE 0 END) AS salidas,
+                MIN(CASE WHEN tipo_movimiento = 'ENTRADA' THEN fecha_evento END) AS primera_entrada,
+                MAX(CASE WHEN tipo_movimiento = 'ENTRADA' THEN fecha_evento END) AS ultima_entrada,
+                MAX(CASE WHEN tipo_movimiento = 'SALIDA' THEN fecha_evento END) AS ultima_salida
+            FROM movimientos_grupo
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+        por_grupo = conexion.execute(
+            """
+            SELECT
+                COALESCE(chat_nombre, chat_username, CAST(chat_id AS TEXT)) AS grupo,
+                SUM(CASE WHEN tipo_movimiento = 'ENTRADA' THEN 1 ELSE 0 END) AS entradas,
+                SUM(CASE WHEN tipo_movimiento = 'SALIDA' THEN 1 ELSE 0 END) AS salidas
+            FROM movimientos_grupo
+            WHERE user_id = ?
+            GROUP BY chat_id
+            ORDER BY grupo
+            """,
+            (user_id,),
+        ).fetchall()
+
+    return {
+        "entradas": int((fila["entradas"] or 0) if fila else 0),
+        "salidas": int((fila["salidas"] or 0) if fila else 0),
+        "primera_entrada": fila["primera_entrada"] if fila else None,
+        "ultima_entrada": fila["ultima_entrada"] if fila else None,
+        "ultima_salida": fila["ultima_salida"] if fila else None,
+        "por_grupo": por_grupo,
+    }
+
+
 def formatear_fecha_peru(fecha_iso):
     if not fecha_iso:
         return "No disponible"
@@ -992,10 +1328,179 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data.startswith("orma_actividad:"):
+        try:
+            captura_id = int(data.split(":", 1)[1])
+        except ValueError:
+            await query.answer()
+            return
+
+        captura = obtener_captura_orma(captura_id)
+        if not captura or captura["propietario_id"] != usuario.id:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+
+        await query.answer()
+
+        resumen = resumen_actividad_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+        )
+
+        lineas = [
+            "📊 <b>ACTIVIDAD REGISTRADA</b>",
+            "",
+            "🕐 <b>Volumen</b>",
+            f"• Última hora: <b>{resumen['hora']}</b>",
+            f"• Hoy: <b>{resumen['dia']}</b>",
+            f"• Semana: <b>{resumen['semana']}</b>",
+            f"• Mes: <b>{resumen['mes']}</b>",
+            "",
+            "📦 <b>Tipos de contenido este mes</b>",
+        ]
+
+        if resumen["tipos_mes"]:
+            for fila in resumen["tipos_mes"][:8]:
+                lineas.append(
+                    f"• {fila['tipo_contenido']}: <b>{fila['total']}</b>"
+                )
+        else:
+            lineas.append("• Sin actividad registrada todavía.")
+
+        lineas.extend(["", "📍 <b>Actividad por grupo este mes</b>"])
+
+        if resumen["grupos_mes"]:
+            for fila in resumen["grupos_mes"][:7]:
+                lineas.append(
+                    f"• {fila['grupo']}: <b>{fila['total']}</b>"
+                )
+        else:
+            lineas.append("• Sin actividad registrada todavía.")
+
+        lineas.extend([
+            "",
+            "ℹ️ El historial comienza desde la activación de este bloque; "
+            "no reconstruye mensajes anteriores.",
+        ])
+
+        await query.edit_message_text(
+            "\n".join(lineas),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🔄 ACTUALIZAR",
+                        callback_data=f"orma_actividad:{captura_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⬅️ RETROCEDER",
+                        callback_data=f"orma_ficha:{captura_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🏠 MENÚ PRINCIPAL",
+                        callback_data="orma_menu_principal",
+                    ),
+                    InlineKeyboardButton(
+                        "🗑 CERRAR",
+                        callback_data="orma_cerrar",
+                    ),
+                ],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_movimientos:"):
+        try:
+            captura_id = int(data.split(":", 1)[1])
+        except ValueError:
+            await query.answer()
+            return
+
+        captura = obtener_captura_orma(captura_id)
+        if not captura or captura["propietario_id"] != usuario.id:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+
+        await query.answer()
+
+        if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
+            lineas = [
+                "🚪 <b>ENTRADAS / SALIDAS</b>",
+                "",
+                "Esta identidad es un canal/chat y no tiene historial "
+                "de membresía de usuario.",
+            ]
+        else:
+            resumen = resumen_movimientos_db(captura["objetivo_id"])
+
+            lineas = [
+                "🚪 <b>ENTRADAS / SALIDAS</b>",
+                "",
+                f"➕ Entradas registradas: <b>{resumen['entradas']}</b>",
+                f"➖ Salidas registradas: <b>{resumen['salidas']}</b>",
+                "",
+                f"🟢 Primera entrada observada: "
+                f"<b>{formatear_fecha_peru(resumen['primera_entrada'])}</b>",
+                f"🔄 Última entrada: "
+                f"<b>{formatear_fecha_peru(resumen['ultima_entrada'])}</b>",
+                f"🔴 Última salida: "
+                f"<b>{formatear_fecha_peru(resumen['ultima_salida'])}</b>",
+                "",
+                "📍 <b>Por grupo</b>",
+            ]
+
+            if resumen["por_grupo"]:
+                for fila in resumen["por_grupo"][:7]:
+                    lineas.append(
+                        f"• {fila['grupo']}: "
+                        f"➕ {int(fila['entradas'] or 0)} · "
+                        f"➖ {int(fila['salidas'] or 0)}"
+                    )
+            else:
+                lineas.append("• Sin movimientos registrados todavía.")
+
+            lineas.extend([
+                "",
+                "ℹ️ Solo se contabilizan movimientos observados desde "
+                "la activación de este registro.",
+            ])
+
+        await query.edit_message_text(
+            "\n".join(lineas),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🔄 ACTUALIZAR",
+                        callback_data=f"orma_movimientos:{captura_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⬅️ RETROCEDER",
+                        callback_data=f"orma_ficha:{captura_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🏠 MENÚ PRINCIPAL",
+                        callback_data="orma_menu_principal",
+                    ),
+                    InlineKeyboardButton(
+                        "🗑 CERRAR",
+                        callback_data="orma_cerrar",
+                    ),
+                ],
+            ]),
+        )
+        return
+
     pendientes = {
         "orma_publicidad:": "📣 CONTROL PUBLICITARIO",
-        "orma_actividad:": "📊 ACTIVIDAD",
-        "orma_movimientos:": "🚪 ENTRADAS / SALIDAS",
     }
 
     for prefijo, titulo in pendientes.items():
@@ -1024,6 +1529,87 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]),
             )
             return
+
+
+
+async def registrar_actividad_grupo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    mensaje = update.effective_message
+    chat = update.effective_chat
+
+    if (
+        not mensaje
+        or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not es_grupo_controlado(chat)
+    ):
+        return
+
+    # Los comandos operativos no forman parte de las métricas de actividad.
+    if getattr(mensaje, "text", None) and mensaje.text.startswith("/"):
+        return
+
+    usuario = mensaje.from_user
+    sender_chat = mensaje.sender_chat
+
+    if usuario is not None:
+        identidad_tipo = "BOT" if usuario.is_bot else "USUARIO"
+        identidad_id = usuario.id
+        username = usuario.username
+        nombre = nombre_visible_usuario(usuario)
+        es_bot = usuario.is_bot
+    elif sender_chat is not None:
+        identidad_tipo = "CANAL/CHAT"
+        identidad_id = sender_chat.id
+        username = sender_chat.username
+        nombre = sender_chat.title or "Sin nombre visible"
+        es_bot = False
+    else:
+        return
+
+    guardar_actividad_db(
+        identidad_tipo=identidad_tipo,
+        identidad_id=identidad_id,
+        username=username,
+        nombre=nombre,
+        es_bot=es_bot,
+        chat=chat,
+        message_id=mensaje.message_id,
+        tipo_contenido=clasificar_contenido_mensaje(mensaje),
+        contiene_enlace=detectar_enlace_mensaje(mensaje),
+    )
+
+
+async def registrar_cambio_membresia_grupo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    cambio = update.chat_member
+    if cambio is None:
+        return
+
+    chat = cambio.chat
+
+    if (
+        chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not es_grupo_controlado(chat)
+    ):
+        return
+
+    usuario = cambio.new_chat_member.user
+    anterior_es_miembro = estado_es_miembro(cambio.old_chat_member)
+    nuevo_es_miembro = estado_es_miembro(cambio.new_chat_member)
+
+    if not anterior_es_miembro and nuevo_es_miembro:
+        guardar_movimiento_db(usuario, chat, "ENTRADA")
+        registrar_usuario_membresia(usuario)
+        return
+
+    if anterior_es_miembro and not nuevo_es_miembro:
+        guardar_movimiento_db(usuario, chat, "SALIDA")
+        registrar_usuario_membresia(usuario)
 
 
 # =========================================================
@@ -1335,7 +1921,22 @@ async def main():
         MessageHandler(
             filters.ChatType.GROUPS & ~filters.COMMAND,
             control_membresia_grupos,
-        )
+        ),
+        group=0,
+    )
+    maximo_app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & ~filters.COMMAND,
+            registrar_actividad_grupo,
+        ),
+        group=1,
+    )
+    maximo_app.add_handler(
+        ChatMemberHandler(
+            registrar_cambio_membresia_grupo,
+            ChatMemberHandler.CHAT_MEMBER,
+        ),
+        group=2,
     )
 
     union_app.add_handler(CommandHandler("start", union_start))
@@ -1355,6 +1956,7 @@ async def main():
     logging.info("@UnionMembresia_bot iniciado.")
     logging.info("Membresía obligatoria configurada: 7/7.")
     logging.info("Regla 7/7 universal activa en los 7 grupos oficiales.")
+    logging.info("Registro de actividad y movimientos del Bloque 3 activo.")
     logging.info("Bots oficiales exentos de raíz: %s", sorted(BOTS_OFICIALES_EXENTOS))
     logging.info("@%s permanece como laboratorio de pruebas.", GRUPO_PRUEBAS_USERNAME)
 

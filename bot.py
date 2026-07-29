@@ -1643,6 +1643,118 @@ def eliminar_panel_orma_db(propietario_id):
         conexion.commit()
 
 
+def obtener_resumen_identidad_orma(objetivo_tipo, objetivo_id):
+    """
+    Resumen compacto para la ficha principal /orma.
+    Usa únicamente información que Máximo ya ha observado/registrado.
+    """
+    with conectar_db() as conexion:
+        actividad = conexion.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                MIN(fecha_evento) AS primera_actividad,
+                MAX(fecha_evento) AS ultima_actividad
+            FROM actividad_grupo
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            """,
+            (objetivo_tipo, objetivo_id),
+        ).fetchone()
+
+        publicidad = conexion.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN decision = 'PERMITIDA' THEN 1 ELSE 0 END) AS permitidas,
+                SUM(CASE WHEN decision <> 'PERMITIDA' THEN 1 ELSE 0 END) AS bloqueadas
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            """,
+            (objetivo_tipo, objetivo_id),
+        ).fetchone()
+
+    usuario_db = (
+        obtener_usuario_membresia_db(objetivo_id)
+        if objetivo_tipo in {"USUARIO", "BOT"}
+        else None
+    )
+
+    movimientos = (
+        resumen_movimientos_db(objetivo_id)
+        if objetivo_tipo in {"USUARIO", "BOT"}
+        else {
+            "entradas": 0,
+            "salidas": 0,
+            "primera_entrada": None,
+            "ultima_entrada": None,
+            "ultima_salida": None,
+            "por_grupo": [],
+        }
+    )
+
+    actividad_periodos = resumen_actividad_db(objetivo_tipo, objetivo_id)
+
+    return {
+        "primer_contacto": (
+            usuario_db["fecha_primer_contacto"]
+            if usuario_db
+            else None
+        ),
+        "ultima_actualizacion_identidad": (
+            usuario_db["fecha_actualizacion"]
+            if usuario_db
+            else None
+        ),
+        "actividad_total": int(
+            actividad["total"] if actividad and actividad["total"] else 0
+        ),
+        "primera_actividad": (
+            actividad["primera_actividad"] if actividad else None
+        ),
+        "ultima_actividad": (
+            actividad["ultima_actividad"] if actividad else None
+        ),
+        "actividad_hora": actividad_periodos["hora"],
+        "actividad_dia": actividad_periodos["dia"],
+        "actividad_semana": actividad_periodos["semana"],
+        "actividad_mes": actividad_periodos["mes"],
+        "publicidad_total": int(
+            publicidad["total"] if publicidad and publicidad["total"] else 0
+        ),
+        "publicidad_permitida": int(
+            publicidad["permitidas"]
+            if publicidad and publicidad["permitidas"]
+            else 0
+        ),
+        "publicidad_bloqueada": int(
+            publicidad["bloqueadas"]
+            if publicidad and publicidad["bloqueadas"]
+            else 0
+        ),
+        "entradas": movimientos["entradas"],
+        "salidas": movimientos["salidas"],
+        "primera_entrada": movimientos["primera_entrada"],
+        "ultima_entrada": movimientos["ultima_entrada"],
+        "ultima_salida": movimientos["ultima_salida"],
+    }
+
+
+def texto_modo_publicidad_ficha(objetivo_tipo, objetivo_id):
+    try:
+        cfg = obtener_control_identidad_db(objetivo_tipo, objetivo_id)
+        modo = str(cfg["modo"] or "HEREDADO").upper()
+        separacion = texto_separacion(cfg["separacion_segundos"])
+        return f"{modo} · {separacion}"
+    except Exception:
+        logging.exception(
+            "No se pudo obtener control publicitario para ficha objetivo=%s",
+            objetivo_id,
+        )
+        return "No disponible"
+
+
 def contar_capturas_objetivo_orma(objetivo_tipo, objetivo_id):
     with conectar_db() as conexion:
         fila = conexion.execute(
@@ -1708,13 +1820,18 @@ def teclado_ficha_orma(captura_id):
 
 async def construir_texto_ficha_orma(captura):
     objetivo_id = captura["objetivo_id"]
-    username = f"@{captura['objetivo_username']}" if captura["objetivo_username"] else "Sin @username"
+    username = (
+        f"@{captura['objetivo_username']}"
+        if captura["objetivo_username"]
+        else "Sin @username"
+    )
     nombre = captura["objetivo_nombre"] or "Sin nombre visible"
     rol = await obtener_rol_en_grupo(captura["chat_id"], objetivo_id)
 
     progreso = "No aplica"
     faltantes = 0
     total = TOTAL_GRUPOS_OBLIGATORIOS
+
     if captura["objetivo_tipo"] in {"USUARIO", "BOT"}:
         try:
             estado = await obtener_estado_membresia_7de7(objetivo_id)
@@ -1723,10 +1840,18 @@ async def construir_texto_ficha_orma(captura):
             faltantes = len(estado["faltantes"])
             progreso = f"{completos}/{total}"
         except Exception:
-            logging.exception("Error obteniendo membresía para /orma objetivo=%s", objetivo_id)
+            logging.exception(
+                "Error obteniendo membresía para /orma objetivo=%s",
+                objetivo_id,
+            )
             progreso = "No disponible"
 
-    oficial = captura["objetivo_tipo"] == "BOT" and (captura["objetivo_username"] or "").lower() in BOTS_OFICIALES_EXENTOS
+    oficial = (
+        captura["objetivo_tipo"] == "BOT"
+        and (captura["objetivo_username"] or "").lower()
+        in BOTS_OFICIALES_EXENTOS
+    )
+
     if oficial:
         condicion = "✅ BOT OFICIAL · EXENTO DE RAÍZ"
     elif progreso == f"{total}/{total}":
@@ -1738,24 +1863,77 @@ async def construir_texto_ficha_orma(captura):
     else:
         condicion = f"🔴 MEMBRESÍA INCOMPLETA · faltan {faltantes}"
 
-    capturas_totales = contar_capturas_objetivo_orma(captura["objetivo_tipo"], objetivo_id)
+    resumen = obtener_resumen_identidad_orma(
+        captura["objetivo_tipo"],
+        objetivo_id,
+    )
+
+    capturas_totales = contar_capturas_objetivo_orma(
+        captura["objetivo_tipo"],
+        objetivo_id,
+    )
+
+    modo_publicidad = texto_modo_publicidad_ficha(
+        captura["objetivo_tipo"],
+        objetivo_id,
+    )
+
+    primera_observacion = (
+        resumen["primer_contacto"]
+        or resumen["primera_actividad"]
+        or captura["fecha_captura"]
+    )
+
+    ultima_observacion = (
+        resumen["ultima_actividad"]
+        or resumen["ultima_actualizacion_identidad"]
+        or captura["fecha_captura"]
+    )
 
     return (
-        "🛡️ <b>FICHA DE CONTROL /ORMA</b>\n\n"
+        "🛡️ <b>FICHA AVANZADA /ORMA</b>\n\n"
+
         "👤 <b>IDENTIDAD</b>\n"
         f"• Nombre: <b>{nombre}</b>\n"
         f"• Usuario: <b>{username}</b>\n"
         f"• ID: <code>{objetivo_id}</code>\n"
         f"• Tipo: <b>{captura['objetivo_tipo']}</b>\n"
         f"• Rol en grupo origen: <b>{rol}</b>\n\n"
+
         "🔐 <b>ESTADO GENERAL</b>\n"
         f"• Membresía: <b>{progreso}</b>\n"
-        f"• Condición: <b>{condicion}</b>\n\n"
-        "📍 <b>ORIGEN DE LA CAPTURA</b>\n"
+        f"• Condición: <b>{condicion}</b>\n"
+        f"• Control publicidad: <b>{modo_publicidad}</b>\n\n"
+
+        "📊 <b>ACTIVIDAD OBSERVADA</b>\n"
+        f"• Última hora: <b>{resumen['actividad_hora']}</b>\n"
+        f"• Hoy: <b>{resumen['actividad_dia']}</b>\n"
+        f"• Semana: <b>{resumen['actividad_semana']}</b>\n"
+        f"• Mes: <b>{resumen['actividad_mes']}</b>\n"
+        f"• Total registrado: <b>{resumen['actividad_total']}</b>\n\n"
+
+        "📣 <b>PUBLICIDAD REGISTRADA</b>\n"
+        f"• Total evaluada: <b>{resumen['publicidad_total']}</b>\n"
+        f"• Permitida: <b>{resumen['publicidad_permitida']}</b>\n"
+        f"• Rechazada/controlada: <b>{resumen['publicidad_bloqueada']}</b>\n\n"
+
+        "🚪 <b>MOVIMIENTOS OBSERVADOS</b>\n"
+        f"• Entradas: <b>{resumen['entradas']}</b>\n"
+        f"• Salidas: <b>{resumen['salidas']}</b>\n"
+        f"• Primera entrada: <b>{formatear_fecha_peru(resumen['primera_entrada'])}</b>\n"
+        f"• Última entrada: <b>{formatear_fecha_peru(resumen['ultima_entrada'])}</b>\n"
+        f"• Última salida: <b>{formatear_fecha_peru(resumen['ultima_salida'])}</b>\n\n"
+
+        "🕐 <b>SEGUIMIENTO</b>\n"
+        f"• Primera observación: <b>{formatear_fecha_peru(primera_observacion)}</b>\n"
+        f"• Última actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>\n"
+        f"• Capturas /orma: <b>{capturas_totales}</b>\n\n"
+
+        "📍 <b>ORIGEN DE ESTA CAPTURA</b>\n"
         f"• Grupo: <b>{captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']}</b>\n"
         f"• Mensaje: <code>{captura['mensaje_origen_id']}</code>\n"
-        f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>\n"
-        f"• Capturas registradas de esta identidad: <b>{capturas_totales}</b>\n\n"
+        f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>\n\n"
+
         "Selecciona una herramienta."
     )
 
@@ -1869,8 +2047,11 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.edit_message_text(
                 "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
-                "Panel administrativo.\n\n"
-                "Usa <code>/orma</code> respondiendo un mensaje en un grupo controlado.",
+                "Centro privado de administración.\n\n"
+                "📌 Responde cualquier mensaje en un grupo controlado "
+                "con <code>/orma</code> para abrir su expediente.\n\n"
+                "Los comandos y datos escritos se eliminan automáticamente "
+                "después de ser procesados.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
@@ -2662,9 +2843,11 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         texto = (
             "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
-            "Panel administrativo.\n\n"
-            "Usa <code>/orma</code> respondiendo un mensaje "
-            "en cualquiera de los grupos controlados."
+            "Centro privado de administración.\n\n"
+            "📌 Responde cualquier mensaje en cualquiera de los grupos "
+            "controlados con <code>/orma</code> para abrir su expediente.\n\n"
+            "🧹 Los comandos y datos operativos se eliminan "
+            "automáticamente para mantener el panel limpio."
         )
         teclado = InlineKeyboardMarkup([[
             InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")

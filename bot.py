@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import sqlite3
+import html
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,7 @@ logging.basicConfig(
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 UNION_BOT_TOKEN = os.environ["UNION_BOT_TOKEN"]
+ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", "0") or 0)
 
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
@@ -125,6 +127,36 @@ def inicializar_base_datos():
             conexion.execute(
                 "ALTER TABLE usuarios_membresia ADD COLUMN union_panel_message_id INTEGER"
             )
+
+        columnas_monitoreo = {
+            "grupos_actuales": "INTEGER NOT NULL DEFAULT 0",
+            "maximo_grupos": "INTEGER NOT NULL DEFAULT 0",
+            "alcanzo_7de7": "INTEGER NOT NULL DEFAULT 0",
+            "perdio_grupos": "INTEGER NOT NULL DEFAULT 0",
+            "total_verificaciones": "INTEGER NOT NULL DEFAULT 0",
+            "fecha_primera_verificacion": "TEXT",
+            "fecha_ultima_verificacion": "TEXT",
+            "origen_chat_id": "INTEGER",
+            "origen_username": "TEXT",
+            "origen_nombre": "TEXT",
+            "fecha_ultimo_acceso": "TEXT",
+        }
+
+        for columna, definicion in columnas_monitoreo.items():
+            if not columna_existe(conexion, "usuarios_membresia", columna):
+                conexion.execute(
+                    f"ALTER TABLE usuarios_membresia ADD COLUMN {columna} {definicion}"
+                )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS paneles_union_admin (
+                admin_id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL,
+                fecha_actualizacion TEXT NOT NULL
+            )
+            """
+        )
 
         conexion.execute(
             """
@@ -358,6 +390,198 @@ def registrar_usuario_membresia(user, union_bot_iniciado=False):
         conexion.commit()
 
 
+def guardar_origen_union_db(user_id, chat_id, username=None, nombre=None):
+    ahora = datetime.now(timezone.utc).isoformat()
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            UPDATE usuarios_membresia
+            SET origen_chat_id = ?,
+                origen_username = ?,
+                origen_nombre = ?,
+                fecha_ultimo_acceso = ?,
+                fecha_actualizacion = ?
+            WHERE user_id = ?
+            """,
+            (chat_id, username, nombre, ahora, ahora, user_id),
+        )
+        conexion.commit()
+
+
+def registrar_verificacion_membresia_db(user_id, estado):
+    ahora = datetime.now(timezone.utc).isoformat()
+    actuales = len(estado["completados"])
+
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            "SELECT * FROM usuarios_membresia WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        if not fila:
+            return
+
+        maximo_anterior = int(fila["maximo_grupos"] or 0)
+        alcanzo_antes = bool(fila["alcanzo_7de7"])
+        maximo_nuevo = max(maximo_anterior, actuales)
+        alcanzo_ahora = alcanzo_antes or actuales >= TOTAL_GRUPOS_OBLIGATORIOS
+        perdio = bool(fila["perdio_grupos"]) or (
+            alcanzo_ahora and actuales < TOTAL_GRUPOS_OBLIGATORIOS
+        )
+        primera = fila["fecha_primera_verificacion"] or ahora
+
+        conexion.execute(
+            """
+            UPDATE usuarios_membresia
+            SET grupos_actuales = ?,
+                maximo_grupos = ?,
+                alcanzo_7de7 = ?,
+                perdio_grupos = ?,
+                total_verificaciones = COALESCE(total_verificaciones, 0) + 1,
+                fecha_primera_verificacion = ?,
+                fecha_ultima_verificacion = ?,
+                fecha_ultimo_acceso = ?,
+                fecha_actualizacion = ?
+            WHERE user_id = ?
+            """,
+            (
+                actuales,
+                maximo_nuevo,
+                1 if alcanzo_ahora else 0,
+                1 if perdio else 0,
+                primera,
+                ahora,
+                ahora,
+                ahora,
+                user_id,
+            ),
+        )
+        conexion.commit()
+
+
+def guardar_panel_union_admin_db(admin_id, message_id):
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            INSERT INTO paneles_union_admin (admin_id, message_id, fecha_actualizacion)
+            VALUES (?, ?, ?)
+            ON CONFLICT(admin_id) DO UPDATE SET
+                message_id = excluded.message_id,
+                fecha_actualizacion = excluded.fecha_actualizacion
+            """,
+            (admin_id, message_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conexion.commit()
+
+
+def obtener_panel_union_admin_db(admin_id):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            "SELECT message_id FROM paneles_union_admin WHERE admin_id = ?",
+            (admin_id,),
+        ).fetchone()
+    return int(fila["message_id"]) if fila else None
+
+
+def eliminar_panel_union_admin_db(admin_id):
+    with conectar_db() as conexion:
+        conexion.execute(
+            "DELETE FROM paneles_union_admin WHERE admin_id = ?",
+            (admin_id,),
+        )
+        conexion.commit()
+
+
+def resumen_monitoreo_union_db():
+    with conectar_db() as conexion:
+        totales = conexion.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN union_bot_iniciado = 1 AND total_verificaciones = 0 THEN 1 ELSE 0 END) AS sin_verificar,
+                SUM(CASE WHEN grupos_actuales = 0 THEN 1 ELSE 0 END) AS cero,
+                SUM(CASE WHEN grupos_actuales BETWEEN 1 AND 6 THEN 1 ELSE 0 END) AS proceso,
+                SUM(CASE WHEN grupos_actuales = 7 THEN 1 ELSE 0 END) AS completos,
+                SUM(CASE WHEN perdio_grupos = 1 THEN 1 ELSE 0 END) AS perdieron
+            FROM usuarios_membresia
+            WHERE union_bot_iniciado = 1
+            """
+        ).fetchone()
+
+        origenes = conexion.execute(
+            """
+            SELECT
+                COALESCE(origen_nombre, origen_username, 'Acceso directo / sin origen') AS origen,
+                COUNT(*) AS total
+            FROM usuarios_membresia
+            WHERE union_bot_iniciado = 1
+            GROUP BY origen_chat_id, origen_username, origen_nombre
+            ORDER BY total DESC, origen ASC
+            """
+        ).fetchall()
+
+        recientes = conexion.execute(
+            """
+            SELECT user_id, username, nombre, grupos_actuales, fecha_ultimo_acceso
+            FROM usuarios_membresia
+            WHERE union_bot_iniciado = 1
+            ORDER BY COALESCE(fecha_ultimo_acceso, fecha_actualizacion) DESC
+            LIMIT 8
+            """
+        ).fetchall()
+
+    return {"totales": totales, "origenes": origenes, "recientes": recientes}
+
+
+def texto_monitoreo_union():
+    resumen = resumen_monitoreo_union_db()
+    t = resumen["totales"]
+
+    lineas = [
+        "📊 <b>MONITOREO DE MEMBRESÍA</b>",
+        "",
+        f"👥 Usuarios registrados: <b>{int(t['total'] or 0)}</b>",
+        f"⏳ Iniciaron sin verificar: <b>{int(t['sin_verificar'] or 0)}</b>",
+        f"🔴 Estado 0/7: <b>{int(t['cero'] or 0)}</b>",
+        f"🟡 Estado 1–6/7: <b>{int(t['proceso'] or 0)}</b>",
+        f"✅ Estado 7/7: <b>{int(t['completos'] or 0)}</b>",
+        f"↩️ Perdieron grupos después: <b>{int(t['perdieron'] or 0)}</b>",
+        "",
+        "📍 <b>ORIGEN DE LOS ACCESOS</b>",
+    ]
+
+    if resumen["origenes"]:
+        for fila in resumen["origenes"]:
+            lineas.append(
+                f"• {html.escape(str(fila['origen']))}: <b>{int(fila['total'])}</b>"
+            )
+    else:
+        lineas.append("• Todavía sin registros")
+
+    lineas.extend(["", "🕐 <b>ACCESOS RECIENTES</b>"])
+
+    if resumen["recientes"]:
+        for fila in resumen["recientes"]:
+            identidad = fila["username"] or fila["nombre"] or str(fila["user_id"])
+            lineas.append(
+                f"• {html.escape(str(identidad))} · "
+                f"<b>{int(fila['grupos_actuales'] or 0)}/7</b> · "
+                f"{formatear_fecha_peru(fila['fecha_ultimo_acceso'])}"
+            )
+    else:
+        lineas.append("• Todavía sin registros")
+
+    lineas.extend(["", "Actualizado: " + formatear_fecha_peru(datetime.now(timezone.utc).isoformat())])
+    return "\n".join(lineas)
+
+
+def teclado_monitoreo_union():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 ACTUALIZAR", callback_data="union_admin_actualizar")],
+        [InlineKeyboardButton("🗑 CERRAR", callback_data="union_admin_cerrar")],
+    ])
+
+
 def obtener_usuario_membresia_db(user_id):
     with conectar_db() as conexion:
         return conexion.execute(
@@ -529,6 +753,7 @@ async def mostrar_o_actualizar_panel_union(user_id):
         return False
 
     estado = await obtener_estado_membresia_7de7(user_id)
+    registrar_verificacion_membresia_db(user_id, estado)
     texto = texto_union_membresia(estado)
     teclado = teclado_union_membresia(estado)
 
@@ -3329,23 +3554,15 @@ async def borrar_aviso_origen_desde_payload(
     context,
     usuario_id,
 ):
-    """
-    Payload esperado:
-        m_<chat_id>_<message_id>_<user_id>
-
-    Solo borra el aviso si el deep-link pertenece al mismo usuario
-    que acaba de iniciar @UnionMembresia_bot.
-    """
+    """Procesa m_<chat_id>_<message_id>_<user_id>, guarda el origen y borra el aviso."""
     if not context.args:
         return
 
     payload = context.args[0]
-
     if not payload.startswith("m_"):
         return
 
     partes = payload.split("_")
-
     if len(partes) != 4:
         return
 
@@ -3359,6 +3576,24 @@ async def borrar_aviso_origen_desde_payload(
     if payload_user_id != usuario_id:
         return
 
+    chat_username = None
+    chat_nombre = None
+
+    if MAXIMO_APP_REF is not None:
+        try:
+            chat_origen = await MAXIMO_APP_REF.bot.get_chat(chat_id)
+            chat_username = getattr(chat_origen, "username", None)
+            chat_nombre = getattr(chat_origen, "title", None)
+        except TelegramError:
+            logging.info("No se pudo resolver el grupo origen chat_id=%s", chat_id)
+
+    guardar_origen_union_db(
+        usuario_id,
+        chat_id,
+        chat_username,
+        chat_nombre,
+    )
+
     if MAXIMO_APP_REF is None:
         return
 
@@ -3368,14 +3603,11 @@ async def borrar_aviso_origen_desde_payload(
             message_id=message_id,
         )
     except TelegramError:
-        # Puede haberse borrado ya por el temporizador de 60 segundos.
         pass
 
     clave = (chat_id, usuario_id)
-
     if AVISOS_MEMBRESIA_ACTIVOS.get(clave) == message_id:
         AVISOS_MEMBRESIA_ACTIVOS.pop(clave, None)
-
 
 
 async def procesar_entrada_control_publicidad(
@@ -3542,6 +3774,7 @@ async def union_verificar_callback(
     )
 
     estado = await obtener_estado_membresia_7de7(usuario.id)
+    registrar_verificacion_membresia_db(usuario.id, estado)
 
     try:
         await query.edit_message_text(
@@ -3563,6 +3796,96 @@ async def union_verificar_callback(
             return
 
         await mostrar_o_actualizar_panel_union(usuario.id)
+
+
+async def union_mi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mensaje = update.effective_message
+    usuario = update.effective_user
+    if not mensaje or not usuario:
+        return
+
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        pass
+
+    respuesta = await context.bot.send_message(
+        chat_id=usuario.id,
+        text=f"🆔 Tu ID de Telegram es: <code>{usuario.id}</code>",
+        parse_mode="HTML",
+    )
+    asyncio.create_task(eliminar_mensaje_despues(respuesta, 60))
+
+
+async def mostrar_monitoreo_union(bot, admin_id):
+    panel_id = obtener_panel_union_admin_db(admin_id)
+    texto = texto_monitoreo_union()
+    teclado = teclado_monitoreo_union()
+
+    if panel_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=admin_id,
+                message_id=panel_id,
+                text=texto,
+                parse_mode="HTML",
+                reply_markup=teclado,
+            )
+            return True
+        except TelegramError as error:
+            if "message is not modified" in str(error).lower():
+                return True
+
+    enviado = await bot.send_message(
+        chat_id=admin_id,
+        text=texto,
+        parse_mode="HTML",
+        reply_markup=teclado,
+    )
+    guardar_panel_union_admin_db(admin_id, enviado.message_id)
+    return True
+
+
+async def union_monitoreo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mensaje = update.effective_message
+    usuario = update.effective_user
+    chat = update.effective_chat
+    if not mensaje or not usuario or not chat or chat.type != ChatType.PRIVATE:
+        return
+
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        pass
+
+    if ADMIN_USER_ID <= 0 or usuario.id != ADMIN_USER_ID:
+        return
+
+    await mostrar_monitoreo_union(context.bot, usuario.id)
+
+
+async def union_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    usuario = update.effective_user
+    if not query or not usuario:
+        return
+
+
+    if ADMIN_USER_ID <= 0 or usuario.id != ADMIN_USER_ID:
+        await query.answer("Acceso no autorizado.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if query.data == "union_admin_cerrar":
+        try:
+            await query.message.delete()
+        except TelegramError:
+            pass
+        eliminar_panel_union_admin_db(usuario.id)
+        return
+
+    await mostrar_monitoreo_union(context.bot, usuario.id)
 
 
 # =========================================================
@@ -3646,10 +3969,18 @@ async def main():
     union_app.add_handler(CommandHandler("start", union_start))
     union_app.add_handler(CommandHandler("membresia", union_membresia))
     union_app.add_handler(CommandHandler("grupos", union_grupos))
+    union_app.add_handler(CommandHandler("mi_id", union_mi_id))
+    union_app.add_handler(CommandHandler("monitoreo", union_monitoreo))
     union_app.add_handler(
         CallbackQueryHandler(
             union_verificar_callback,
             pattern=r"^union_verificar$",
+        )
+    )
+    union_app.add_handler(
+        CallbackQueryHandler(
+            union_admin_callback,
+            pattern=r"^union_admin_",
         )
     )
 

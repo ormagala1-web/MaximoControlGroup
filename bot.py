@@ -46,20 +46,12 @@ async def safe_edit_message_text(
         )
     except TelegramError as error:
         detalle = str(error).lower()
-
         if (
             "message is not modified" in detalle
             or "message to edit not found" in detalle
             or "message can't be edited" in detalle
             or "bad request" in detalle
         ):
-            logging.warning(
-                "Edición rechazada chat_id=%s message_id=%s. "
-                "Se enviará un mensaje nuevo. Detalle: %s",
-                chat_id,
-                message_id,
-                error,
-            )
             return await bot.send_message(
                 chat_id=chat_id,
                 text=text,
@@ -67,7 +59,6 @@ async def safe_edit_message_text(
                 reply_markup=reply_markup,
                 **kwargs,
             )
-
         raise
 
 
@@ -87,29 +78,19 @@ async def safe_query_edit_message(
         )
     except TelegramError as error:
         detalle = str(error).lower()
-
         if (
             "message is not modified" in detalle
             or "message to edit not found" in detalle
             or "message can't be edited" in detalle
             or "bad request" in detalle
         ):
-            chat_id = query.message.chat_id
-            logging.warning(
-                "Edición de callback rechazada chat_id=%s message_id=%s. "
-                "Se enviará un mensaje nuevo. Detalle: %s",
-                chat_id,
-                query.message.message_id,
-                error,
-            )
             return await query.get_bot().send_message(
-                chat_id=chat_id,
+                chat_id=query.message.chat_id,
                 text=text,
                 parse_mode=parse_mode,
                 reply_markup=reply_markup,
                 **kwargs,
             )
-
         raise
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -126,17 +107,17 @@ GRUPO_PRUEBAS_USERNAME = "Orma_Pruebas"
 ZONA_PERU = ZoneInfo("America/Lima")
 
 GRUPOS_OFICIALES = [
-    (1, "DISTRITO STREAMING UNIVERSAL ðŸŒŽðŸŒ", "DistritoStreamingUniversal", "DistritoStreamingUniversal_Bot"),
-    (2, "STREAMING DIGITAL PERUCHO ðŸ‡µðŸ‡ª", "StreamingDigitalPerucho", "StreamingDigitalPerucho_bot"),
-    (3, "PERÃš ENTRETENIMIENTO STREAMING ðŸ‡µðŸ‡ª", "PeruEntretenimientoStreaming", "PeruEntretenimientoStreaming_Bot"),
-    (4, "MUNDO CACHINERO STREAMING ðŸŒŽ", "MundoCachineroStreaming", "MUCASTBOT"),
-    (5, "ðŸŒŽ UNIVERSO CIBERNÃ‰TICO PERÃš ðŸ‡µðŸ‡ª", "mundocibertetico", "UniversoCibertneticoPeru_bot"),
-    (6, "ðŸ’» Metaverso Streaming PerÃº ðŸ‡µðŸ‡ª", "metaversostreaminggo", "MetaversoPeru_bot"),
-    (7, "ðŸŽ­ MUNDO STREAMING PERÃš ðŸ‡µðŸ‡ª", "mymundostreaming", "MundoStreamingPeru_bot"),
+    (1, "DISTRITO STREAMING UNIVERSAL 🌎🌍", "DistritoStreamingUniversal", "DistritoStreamingUniversal_Bot"),
+    (2, "STREAMING DIGITAL PERUCHO 🇵🇪", "StreamingDigitalPerucho", "StreamingDigitalPerucho_bot"),
+    (3, "PERÚ ENTRETENIMIENTO STREAMING 🇵🇪", "PeruEntretenimientoStreaming", "PeruEntretenimientoStreaming_Bot"),
+    (4, "MUNDO CACHINERO STREAMING 🌎", "MundoCachineroStreaming", "MUCASTBOT"),
+    (5, "🌎 UNIVERSO CIBERNÉTICO PERÚ 🇵🇪", "mundocibertetico", "UniversoCibertneticoPeru_bot"),
+    (6, "💻 Metaverso Streaming Perú 🇵🇪", "metaversostreaminggo", "MetaversoPeru_bot"),
+    (7, "🎭 MUNDO STREAMING PERÚ 🇵🇪", "mymundostreaming", "MundoStreamingPeru_bot"),
 ]
 
-# Bots oficiales excluidos DE RAÃZ del control 7/7.
-# Cualquier otro bot, usuario o administrador sÃ­ queda sujeto a la regla.
+# Bots oficiales excluidos DE RAÍZ del control 7/7.
+# Cualquier otro bot, usuario o administrador sí queda sujeto a la regla.
 BOTS_OFICIALES_EXENTOS = {
     "distritostreaminguniversal_bot",
     "streamingdigitalperucho_bot",
@@ -169,11 +150,11 @@ AVISOS_PUBLICIDAD_ACTIVOS = {}
 
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
-# Tipos controlables. TEXTO puro continÃºa siendo libre.
+# Tipos controlables. TEXTO puro continúa siendo libre.
 TIPOS_PUBLICIDAD_CONTROLABLE = {
     "FOTO",
     "VIDEO",
-    "GIF/ANIMACIÃ“N",
+    "GIF/ANIMACIÓN",
     "DOCUMENTO",
     "TEXTO + ENLACE",
     "CUSTOM EMOJI",
@@ -626,38 +607,38 @@ def texto_monitoreo_union():
     t = resumen["totales"]
 
     lineas = [
-        "ðŸ“Š <b>MONITOREO DE MEMBRESÃA</b>",
+        "📊 <b>MONITOREO DE MEMBRESÍA</b>",
         "",
-        f"ðŸ‘¥ Usuarios registrados: <b>{int(t['total'] or 0)}</b>",
-        f"â³ Iniciaron sin verificar: <b>{int(t['sin_verificar'] or 0)}</b>",
-        f"ðŸ”´ Estado 0/7: <b>{int(t['cero'] or 0)}</b>",
-        f"ðŸŸ¡ Estado 1â€“6/7: <b>{int(t['proceso'] or 0)}</b>",
-        f"âœ… Estado 7/7: <b>{int(t['completos'] or 0)}</b>",
-        f"â†©ï¸ Perdieron grupos despuÃ©s: <b>{int(t['perdieron'] or 0)}</b>",
+        f"👥 Usuarios registrados: <b>{int(t['total'] or 0)}</b>",
+        f"⏳ Iniciaron sin verificar: <b>{int(t['sin_verificar'] or 0)}</b>",
+        f"🔴 Estado 0/7: <b>{int(t['cero'] or 0)}</b>",
+        f"🟡 Estado 1–6/7: <b>{int(t['proceso'] or 0)}</b>",
+        f"✅ Estado 7/7: <b>{int(t['completos'] or 0)}</b>",
+        f"↩️ Perdieron grupos después: <b>{int(t['perdieron'] or 0)}</b>",
         "",
-        "ðŸ“ <b>ORIGEN DE LOS ACCESOS</b>",
+        "📍 <b>ORIGEN DE LOS ACCESOS</b>",
     ]
 
     if resumen["origenes"]:
         for fila in resumen["origenes"]:
             lineas.append(
-                f"â€¢ {html.escape(str(fila['origen']))}: <b>{int(fila['total'])}</b>"
+                f"• {html.escape(str(fila['origen']))}: <b>{int(fila['total'])}</b>"
             )
     else:
-        lineas.append("â€¢ TodavÃ­a sin registros")
+        lineas.append("• Todavía sin registros")
 
-    lineas.extend(["", "ðŸ• <b>ACCESOS RECIENTES</b>"])
+    lineas.extend(["", "🕐 <b>ACCESOS RECIENTES</b>"])
 
     if resumen["recientes"]:
         for fila in resumen["recientes"]:
             identidad = fila["username"] or fila["nombre"] or str(fila["user_id"])
             lineas.append(
-                f"â€¢ {html.escape(str(identidad))} Â· "
-                f"<b>{int(fila['grupos_actuales'] or 0)}/7</b> Â· "
+                f"• {html.escape(str(identidad))} · "
+                f"<b>{int(fila['grupos_actuales'] or 0)}/7</b> · "
                 f"{formatear_fecha_peru(fila['fecha_ultimo_acceso'])}"
             )
     else:
-        lineas.append("â€¢ TodavÃ­a sin registros")
+        lineas.append("• Todavía sin registros")
 
     lineas.extend(["", "Actualizado: " + formatear_fecha_peru(datetime.now(timezone.utc).isoformat())])
     return "\n".join(lineas)
@@ -665,8 +646,8 @@ def texto_monitoreo_union():
 
 def teclado_monitoreo_union():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("ðŸ”„ ACTUALIZAR", callback_data="union_admin_actualizar")],
-        [InlineKeyboardButton("ðŸ—‘ CERRAR", callback_data="union_admin_cerrar")],
+        [InlineKeyboardButton("🔄 ACTUALIZAR", callback_data="union_admin_actualizar")],
+        [InlineKeyboardButton("🗑 CERRAR", callback_data="union_admin_cerrar")],
     ])
 
 
@@ -723,7 +704,7 @@ def estado_es_miembro(chat_member):
 
 async def obtener_estado_membresia_7de7(user_id):
     if MAXIMO_APP_REF is None:
-        raise RuntimeError("MaximoControlGroup todavÃ­a no estÃ¡ inicializado.")
+        raise RuntimeError("MaximoControlGroup todavía no está inicializado.")
 
     grupos = obtener_grupos_obligatorios_db()
     faltantes = []
@@ -771,16 +752,16 @@ def texto_union_membresia(estado):
 
     if estado["completo"]:
         return (
-            "âœ… <b>MEMBRESÃA COMPLETA</b>\n\n"
+            "✅ <b>MEMBRESÍA COMPLETA</b>\n\n"
             f"Progreso: <b>{completos}/{total}</b>\n\n"
             "Ya perteneces a todos los grupos oficiales requeridos.\n\n"
-            "ðŸ’¬ Puedes participar con texto normal.\n"
-            "ðŸ›¡ï¸ La publicidad quedarÃ¡ sujeta al Control Publicitario General "
-            "cuando activemos ese mÃ³dulo."
+            "💬 Puedes participar con texto normal.\n"
+            "🛡️ La publicidad quedará sujeta al Control Publicitario General "
+            "cuando activemos ese módulo."
         )
 
     lineas = [
-        "ðŸ” <b>MEMBRESÃA DE USUARIO</b>",
+        "🔐 <b>MEMBRESÍA DE USUARIO</b>",
         "",
         f"Progreso: <b>{completos}/{total}</b>",
         "",
@@ -789,13 +770,13 @@ def texto_union_membresia(estado):
     ]
 
     for grupo in estado["faltantes"]:
-        lineas.append(f"âŒ {grupo['nombre']}")
+        lineas.append(f"❌ {grupo['nombre']}")
 
     lineas.extend(
         [
             "",
             "Usa los botones de abajo para ingresar.",
-            "Luego pulsa <b>ðŸ”„ VERIFICAR MEMBRESÃA</b>.",
+            "Luego pulsa <b>🔄 VERIFICAR MEMBRESÍA</b>.",
         ]
     )
 
@@ -803,7 +784,7 @@ def texto_union_membresia(estado):
         lineas.extend(
             [
                 "",
-                "âš ï¸ Alguna comprobaciÃ³n no pudo confirmarse. "
+                "⚠️ Alguna comprobación no pudo confirmarse. "
                 "Por seguridad permanece como pendiente.",
             ]
         )
@@ -818,7 +799,7 @@ def teclado_union_membresia(estado):
         filas.append(
             [
                 InlineKeyboardButton(
-                    f"âž• {grupo['nombre']}",
+                    f"➕ {grupo['nombre']}",
                     url=grupo["enlace"],
                 )
             ]
@@ -827,7 +808,7 @@ def teclado_union_membresia(estado):
     filas.append(
         [
             InlineKeyboardButton(
-                "ðŸ”„ VERIFICAR MEMBRESÃA",
+                "🔄 VERIFICAR MEMBRESÍA",
                 callback_data="union_verificar",
             )
         ]
@@ -866,12 +847,12 @@ async def mostrar_o_actualizar_panel_union(user_id):
         except TelegramError as error:
             # Telegram devuelve "Message is not modified" cuando el panel
             # ya contiene exactamente el estado actual. Eso NO significa
-            # que el panel estÃ© perdido, asÃ­ que no debemos crear otro.
+            # que el panel esté perdido, así que no debemos crear otro.
             if "message is not modified" in str(error).lower():
                 return True
 
-            # Para cualquier otro error (por ejemplo, el usuario borrÃ³
-            # manualmente el panel), se crea uno nuevo mÃ¡s abajo.
+            # Para cualquier otro error (por ejemplo, el usuario borró
+            # manualmente el panel), se crea uno nuevo más abajo.
             logging.info(
                 "No se pudo editar panel privado user=%s, message_id=%s: %s",
                 user_id,
@@ -891,7 +872,7 @@ async def mostrar_o_actualizar_panel_union(user_id):
     except TelegramError:
         logging.info(
             "No se pudo escribir por privado a user=%s; "
-            "probablemente todavÃ­a no iniciÃ³ @UnionMembresia_bot.",
+            "probablemente todavía no inició @UnionMembresia_bot.",
             user_id,
         )
         return False
@@ -1040,15 +1021,15 @@ async def mostrar_aviso_union_temporal(
     progreso = f"{len(estado['completados'])}/{estado['total']}"
 
     texto_aviso = (
-        "ðŸ”’ <b>MEMBRESÃA PENDIENTE</b>\n\n"
-        f"ðŸ‘¤ <b>Nombre:</b> {nombre}\n"
-        f"ðŸ”— <b>Usuario:</b> {username}\n"
-        f"ðŸ†” <b>ID:</b> <code>{user_id}</code>\n"
-        f"ðŸ·ï¸ <b>Tipo:</b> {tipo}\n"
-        f"ðŸ›¡ï¸ <b>Rol:</b> {rol}\n"
-        f"ðŸ“Š <b>MembresÃ­a:</b> {progreso}\n\n"
-        "Para participar debes completar tu membresÃ­a en los 7 grupos oficiales.\n\n"
-        "Pulsa el botÃ³n para continuar de forma privada."
+        "🔒 <b>MEMBRESÍA PENDIENTE</b>\n\n"
+        f"👤 <b>Nombre:</b> {nombre}\n"
+        f"🔗 <b>Usuario:</b> {username}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"🏷️ <b>Tipo:</b> {tipo}\n"
+        f"🛡️ <b>Rol:</b> {rol}\n"
+        f"📊 <b>Membresía:</b> {progreso}\n\n"
+        "Para participar debes completar tu membresía en los 7 grupos oficiales.\n\n"
+        "Pulsa el botón para continuar de forma privada."
     )
 
     # Primero enviamos el aviso para obtener su message_id.
@@ -1058,7 +1039,7 @@ async def mostrar_aviso_union_temporal(
         parse_mode="HTML",
     )
 
-    # El payload identifica el aviso exacto que originÃ³ el acceso.
+    # El payload identifica el aviso exacto que originó el acceso.
     payload = f"m_{chat_id}_{aviso.message_id}_{user_id}"
     enlace_union = (
         f"https://t.me/{UNION_BOT_USERNAME}?start={payload}"
@@ -1071,7 +1052,7 @@ async def mostrar_aviso_union_temporal(
             [
                 [
                     InlineKeyboardButton(
-                        "ðŸ” COMPLETAR MEMBRESÃA",
+                        "🔐 COMPLETAR MEMBRESÍA",
                         url=enlace_union,
                     )
                 ]
@@ -1220,7 +1201,7 @@ def contiene_custom_emoji(mensaje):
 
 
 def tipo_publicitario_mensaje(mensaje, usuario=None):
-    # Bots externos: cualquier publicaciÃ³n se considera controlable.
+    # Bots externos: cualquier publicación se considera controlable.
     if usuario is not None and getattr(usuario, "is_bot", False):
         if es_bot_oficial_exento(usuario):
             return None
@@ -1232,7 +1213,7 @@ def tipo_publicitario_mensaje(mensaje, usuario=None):
     if tipo in {
         "FOTO",
         "VIDEO",
-        "GIF/ANIMACIÃ“N",
+        "GIF/ANIMACIÓN",
         "DOCUMENTO",
         "TEXTO + ENLACE",
     }:
@@ -1249,14 +1230,14 @@ def tipo_habilitado_por_config(tipo, cfg):
     mapa = {
         "FOTO": "controlar_foto",
         "VIDEO": "controlar_video",
-        "GIF/ANIMACIÃ“N": "controlar_gif",
+        "GIF/ANIMACIÓN": "controlar_gif",
         "DOCUMENTO": "controlar_documento",
         "TEXTO + ENLACE": "controlar_enlace",
         "CUSTOM EMOJI": "controlar_custom_emoji",
     }
 
-    # Para bots externos, cualquier formato no reconocido especÃ­ficamente
-    # continÃºa bajo control.
+    # Para bots externos, cualquier formato no reconocido específicamente
+    # continúa bajo control.
     campo = mapa.get(tipo)
     if campo is None:
         return True
@@ -1411,9 +1392,9 @@ def resumen_frecuencia_publicidad_db(
     max_eventos=20,
 ):
     """
-    Analiza intentos/publicaciones que el motor clasificÃ³ como publicidad.
+    Analiza intentos/publicaciones que el motor clasificó como publicidad.
     Incluye permitidas y rechazadas para reflejar el comportamiento real
-    de la identidad, no solamente lo que finalmente quedÃ³ visible.
+    de la identidad, no solamente lo que finalmente quedó visible.
     """
     ahora = datetime.now(timezone.utc)
     desde_hora = (ahora - timedelta(hours=1)).isoformat()
@@ -1533,7 +1514,7 @@ def resumen_frecuencia_publicidad_db(
     ultimas_24h = int((fila["ultimas_24h"] or 0) if fila else 0)
     hoy = int((fila["hoy"] or 0) if fila else 0)
 
-    # Promedio equivalente de publicaciones por hora en las Ãºltimas 24 h.
+    # Promedio equivalente de publicaciones por hora en las últimas 24 h.
     promedio_por_hora_24h = round(ultimas_24h / 24, 2)
 
     return {
@@ -1559,7 +1540,7 @@ def resumen_frecuencia_publicidad_db(
 
 def texto_ritmo_publicitario(resumen):
     if resumen["muestra_intervalos"] <= 0:
-        frecuencia = "AÃºn sin muestra suficiente"
+        frecuencia = "Aún sin muestra suficiente"
         ultimo_intervalo = "No disponible"
     else:
         frecuencia = (
@@ -1592,10 +1573,10 @@ def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
     if not tipo_habilitado_por_config(tipo_contenido, cfg):
         return True, f"TIPO {tipo_contenido} EXCLUIDO", cfg, None
 
-    # HEREDADO queda preparado para el prÃ³ximo bloque global.
-    # Mientras no exista regla global, no impone lÃ­mites individuales.
+    # HEREDADO queda preparado para el próximo bloque global.
+    # Mientras no exista regla global, no impone límites individuales.
     if modo == "HEREDADO":
-        return True, "HEREDADO Â· SIN REGLA GLOBAL ACTIVA TODAVÃA", cfg, None
+        return True, "HEREDADO · SIN REGLA GLOBAL ACTIVA TODAVÍA", cfg, None
 
     # PERSONALIZADO
     ahora = datetime.now(timezone.utc)
@@ -1612,7 +1593,7 @@ def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
                 if ahora < disponible:
                     return (
                         False,
-                        "SEPARACIÃ“N MÃNIMA NO CUMPLIDA",
+                        "SEPARACIÓN MÍNIMA NO CUMPLIDA",
                         cfg,
                         disponible,
                     )
@@ -1621,11 +1602,11 @@ def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
 
     limites = limites_periodos_publicidad()
     campos = [
-        ("hora", "limite_hora", "LÃMITE POR HORA"),
-        ("dia", "limite_dia", "LÃMITE DIARIO"),
-        ("semana", "limite_semana", "LÃMITE SEMANAL"),
-        ("mes", "limite_mes", "LÃMITE MENSUAL"),
-        ("anio", "limite_anio", "LÃMITE ANUAL"),
+        ("hora", "limite_hora", "LÍMITE POR HORA"),
+        ("dia", "limite_dia", "LÍMITE DIARIO"),
+        ("semana", "limite_semana", "LÍMITE SEMANAL"),
+        ("mes", "limite_mes", "LÍMITE MENSUAL"),
+        ("anio", "limite_anio", "LÍMITE ANUAL"),
     ]
 
     for periodo, campo, etiqueta in campos:
@@ -1642,16 +1623,16 @@ def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
         if usados >= int(limite):
             return False, etiqueta, cfg, None
 
-    return True, "DENTRO DE LOS LÃMITES", cfg, None
+    return True, "DENTRO DE LOS LÍMITES", cfg, None
 
 
 def texto_valor_limite(valor):
-    return "SIN LÃMITE" if valor is None else str(valor)
+    return "SIN LÍMITE" if valor is None else str(valor)
 
 
 def texto_separacion(segundos):
     if segundos is None:
-        return "SIN SEPARACIÃ“N"
+        return "SIN SEPARACIÓN"
 
     segundos = int(segundos)
 
@@ -1714,45 +1695,45 @@ def teclado_control_publicidad(captura_id, cfg):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                f"âš™ï¸ MODO: {modo}",
+                f"⚙️ MODO: {modo}",
                 callback_data=f"orma_pub_modo:{captura_id}",
             )
         ],
         [
             InlineKeyboardButton(
-                f"â± SEPARACIÃ“N: {texto_separacion(cfg['separacion_segundos'])}",
+                f"⏱ SEPARACIÓN: {texto_separacion(cfg['separacion_segundos'])}",
                 callback_data=f"orma_pub_sep:{captura_id}",
             )
         ],
         [
             InlineKeyboardButton(
-                "ðŸ”¢ LÃMITES",
+                "🔢 LÍMITES",
                 callback_data=f"orma_pub_limites:{captura_id}",
             ),
             InlineKeyboardButton(
-                "ðŸŽ› TIPOS",
+                "🎛 TIPOS",
                 callback_data=f"orma_pub_tipos:{captura_id}",
             ),
         ],
         [
             InlineKeyboardButton(
-                "â™»ï¸ RESTAURAR HEREDADO",
+                "♻️ RESTAURAR HEREDADO",
                 callback_data=f"orma_pub_reset:{captura_id}",
             )
         ],
         [
             InlineKeyboardButton(
-                "â¬…ï¸ RETROCEDER",
+                "⬅️ RETROCEDER",
                 callback_data=f"orma_ficha:{captura_id}",
             )
         ],
         [
             InlineKeyboardButton(
-                "ðŸ  MENÃš PRINCIPAL",
+                "🏠 MENÚ PRINCIPAL",
                 callback_data="orma_menu_principal",
             ),
             InlineKeyboardButton(
-                "ðŸ—‘ CERRAR",
+                "🗑 CERRAR",
                 callback_data="orma_cerrar",
             ),
         ],
@@ -1782,9 +1763,9 @@ async def texto_control_publicidad(captura):
 
     modo = str(cfg["modo"] or "HEREDADO").upper()
     if modo == "HEREDADO":
-        efecto = "UsarÃ¡ la regla general cuando el mÃ³dulo global estÃ© activo"
+        efecto = "Usará la regla general cuando el módulo global esté activo"
     elif modo == "PERSONALIZADO":
-        efecto = "Aplica separaciÃ³n, lÃ­mites y tipos propios"
+        efecto = "Aplica separación, límites y tipos propios"
     elif modo == "ILIMITADO":
         efecto = "Registra publicidad, pero no la limita"
     elif modo == "BLOQUEADO":
@@ -1799,42 +1780,42 @@ async def texto_control_publicidad(captura):
     )
 
     return (
-        "ðŸ“£ <b>CONTROL PUBLICITARIO INDIVIDUAL</b>\n\n"
-        f"ðŸ‘¤ <b>{captura['objetivo_nombre'] or 'Sin nombre'}</b>\n"
-        f"ðŸ†” <code>{captura['objetivo_id']}</code>\n"
-        f"ðŸ·ï¸ Tipo: <b>{captura['objetivo_tipo']}</b>\n\n"
+        "📣 <b>CONTROL PUBLICITARIO INDIVIDUAL</b>\n\n"
+        f"👤 <b>{captura['objetivo_nombre'] or 'Sin nombre'}</b>\n"
+        f"🆔 <code>{captura['objetivo_id']}</code>\n"
+        f"🏷️ Tipo: <b>{captura['objetivo_tipo']}</b>\n\n"
 
-        "âš™ï¸ <b>ESTADO DEL CONTROL</b>\n"
-        f"â€¢ Modo: <b>{modo}</b>\n"
-        f"â€¢ Efecto: <b>{efecto}</b>\n"
-        f"â€¢ SeparaciÃ³n: <b>{texto_separacion(cfg['separacion_segundos'])}</b>\n"
-        f"â€¢ PrÃ³xima por separaciÃ³n: <b>{proxima}</b>\n\n"
+        "⚙️ <b>ESTADO DEL CONTROL</b>\n"
+        f"• Modo: <b>{modo}</b>\n"
+        f"• Efecto: <b>{efecto}</b>\n"
+        f"• Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>\n"
+        f"• Próxima por separación: <b>{proxima}</b>\n\n"
 
-        "ðŸ”¢ <b>LÃMITES PERSONALIZADOS</b>\n"
-        f"â€¢ Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b> "
-        f"Â· usados {uso['hora']}\n"
-        f"â€¢ DÃ­a: <b>{texto_valor_limite(cfg['limite_dia'])}</b> "
-        f"Â· usados {uso['dia']}\n"
-        f"â€¢ Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b> "
-        f"Â· usados {uso['semana']}\n"
-        f"â€¢ Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b> "
-        f"Â· usados {uso['mes']}\n"
-        f"â€¢ AÃ±o: <b>{texto_valor_limite(cfg['limite_anio'])}</b> "
-        f"Â· usados {uso['anio']}\n\n"
+        "🔢 <b>LÍMITES PERSONALIZADOS</b>\n"
+        f"• Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b> "
+        f"· usados {uso['hora']}\n"
+        f"• Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b> "
+        f"· usados {uso['dia']}\n"
+        f"• Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b> "
+        f"· usados {uso['semana']}\n"
+        f"• Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b> "
+        f"· usados {uso['mes']}\n"
+        f"• Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b> "
+        f"· usados {uso['anio']}\n\n"
 
-        "ðŸŽ› <b>TIPOS</b>\n"
-        f"â€¢ Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>\n"
-        f"â€¢ Libres por excepciÃ³n: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>\n"
-        "â€¢ Texto normal puro: <b>SIEMPRE LIBRE</b>\n\n"
+        "🎛 <b>TIPOS</b>\n"
+        f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>\n"
+        f"• Libres por excepción: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>\n"
+        "• Texto normal puro: <b>SIEMPRE LIBRE</b>\n\n"
 
-        "ðŸ“Š <b>COMPORTAMIENTO OBSERVADO</b>\n"
-        f"â€¢ Publicidad Ãºltima hora: <b>{ritmo['ultima_hora']}</b>\n"
-        f"â€¢ Ãšltimas 24 h: <b>{ritmo['ultimas_24h']}</b>\n"
-        f"â€¢ Frecuencia: <b>{ritmo_txt['frecuencia']}</b>\n"
-        f"â€¢ Ãšltima publicidad: "
+        "📊 <b>COMPORTAMIENTO OBSERVADO</b>\n"
+        f"• Publicidad última hora: <b>{ritmo['ultima_hora']}</b>\n"
+        f"• Últimas 24 h: <b>{ritmo['ultimas_24h']}</b>\n"
+        f"• Frecuencia: <b>{ritmo_txt['frecuencia']}</b>\n"
+        f"• Última publicidad: "
         f"<b>{formatear_fecha_peru(ritmo['ultima_publicidad'])}</b>\n\n"
 
-        "Selecciona quÃ© deseas modificar."
+        "Selecciona qué deseas modificar."
     )
 
 
@@ -1887,7 +1868,7 @@ async def mostrar_aviso_publicidad_temporal(
     extra = ""
     if disponible is not None:
         extra = (
-            "\\nâ³ PrÃ³xima disponibilidad: "
+            "\\n⏳ Próxima disponibilidad: "
             f"<b>{formatear_fecha_peru(disponible.isoformat())}</b>"
         )
 
@@ -1896,15 +1877,15 @@ async def mostrar_aviso_publicidad_temporal(
     aviso = await context.bot.send_message(
         chat_id=chat.id,
         text=(
-            "â›” <b>PUBLICIDAD NO PERMITIDA</b>\\n\\n"
-            f"ðŸ‘¤ <b>Nombre:</b> {nombre}\\n"
-            f"ðŸ”— <b>Usuario:</b> {user_text}\\n"
-            f"ðŸ†” <b>ID:</b> <code>{identidad_id}</code>\\n"
-            f"ðŸ·ï¸ <b>Tipo:</b> {tipo_identidad}\\n"
-            f"ðŸ“¦ <b>Contenido:</b> {tipo_contenido}\\n"
-            f"âš ï¸ <b>Motivo:</b> {motivo}"
+            "⛔ <b>PUBLICIDAD NO PERMITIDA</b>\\n\\n"
+            f"👤 <b>Nombre:</b> {nombre}\\n"
+            f"🔗 <b>Usuario:</b> {user_text}\\n"
+            f"🆔 <b>ID:</b> <code>{identidad_id}</code>\\n"
+            f"🏷️ <b>Tipo:</b> {tipo_identidad}\\n"
+            f"📦 <b>Contenido:</b> {tipo_contenido}\\n"
+            f"⚠️ <b>Motivo:</b> {motivo}"
             f"{extra}\\n\\n"
-            "ðŸ’¬ Puedes continuar escribiendo texto normal."
+            "💬 Puedes continuar escribiendo texto normal."
         ),
         parse_mode="HTML",
     )
@@ -1979,7 +1960,7 @@ def clasificar_contenido_mensaje(mensaje):
         return "VIDEO"
 
     if getattr(mensaje, "animation", None):
-        return "GIF/ANIMACIÃ“N"
+        return "GIF/ANIMACIÓN"
 
     if getattr(mensaje, "document", None):
         return "DOCUMENTO"
@@ -2213,7 +2194,7 @@ def formatear_fecha_peru(fecha_iso):
         if fecha.tzinfo is None:
             fecha = fecha.replace(tzinfo=timezone.utc)
         fecha = fecha.astimezone(ZONA_PERU)
-        texto = fecha.strftime("%d/%m/%Y Â· %I:%M %p")
+        texto = fecha.strftime("%d/%m/%Y · %I:%M %p")
         return texto.replace("AM", "a. m.").replace("PM", "p. m.")
     except (TypeError, ValueError):
         return str(fecha_iso)
@@ -2252,7 +2233,7 @@ def eliminar_panel_orma_db(propietario_id):
 def obtener_resumen_identidad_orma(objetivo_tipo, objetivo_id):
     """
     Resumen compacto para la ficha principal /orma.
-    Usa Ãºnicamente informaciÃ³n que MÃ¡ximo ya ha observado/registrado.
+    Usa únicamente información que Máximo ya ha observado/registrado.
     """
     with conectar_db() as conexion:
         actividad = conexion.execute(
@@ -2356,7 +2337,7 @@ def texto_modo_publicidad_ficha(objetivo_tipo, objetivo_id):
         cfg = obtener_control_identidad_db(objetivo_tipo, objetivo_id)
         modo = str(cfg["modo"] or "HEREDADO").upper()
         separacion = texto_separacion(cfg["separacion_segundos"])
-        return f"{modo} Â· {separacion}"
+        return f"{modo} · {separacion}"
     except Exception:
         logging.exception(
             "No se pudo obtener control publicitario para ficha objetivo=%s",
@@ -2412,18 +2393,18 @@ def obtener_captura_orma(captura_id):
 
 def teclado_ficha_orma(captura_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("ðŸ”„ ACTUALIZAR FICHA", callback_data=f"orma_ficha:{captura_id}")],
+        [InlineKeyboardButton("🔄 ACTUALIZAR FICHA", callback_data=f"orma_ficha:{captura_id}")],
         [
-            InlineKeyboardButton("ðŸ” MEMBRESÃA", callback_data=f"orma_membresia:{captura_id}"),
-            InlineKeyboardButton("ðŸ“£ PUBLICIDAD", callback_data=f"orma_publicidad:{captura_id}"),
+            InlineKeyboardButton("🔐 MEMBRESÍA", callback_data=f"orma_membresia:{captura_id}"),
+            InlineKeyboardButton("📣 PUBLICIDAD", callback_data=f"orma_publicidad:{captura_id}"),
         ],
         [
-            InlineKeyboardButton("ðŸ“Š ACTIVIDAD", callback_data=f"orma_actividad:{captura_id}"),
-            InlineKeyboardButton("ðŸšª ENTRADAS / SALIDAS", callback_data=f"orma_movimientos:{captura_id}"),
+            InlineKeyboardButton("📊 ACTIVIDAD", callback_data=f"orma_actividad:{captura_id}"),
+            InlineKeyboardButton("🚪 ENTRADAS / SALIDAS", callback_data=f"orma_movimientos:{captura_id}"),
         ],
         [
-            InlineKeyboardButton("ðŸ  MENÃš PRINCIPAL", callback_data="orma_menu_principal"),
-            InlineKeyboardButton("ðŸ—‘ CERRAR", callback_data="orma_cerrar"),
+            InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
         ],
     ])
 
@@ -2451,7 +2432,7 @@ async def construir_texto_ficha_orma(captura):
             progreso = f"{completos}/{total}"
         except Exception:
             logging.exception(
-                "Error obteniendo membresÃ­a para /orma objetivo=%s",
+                "Error obteniendo membresía para /orma objetivo=%s",
                 objetivo_id,
             )
             progreso = "No disponible"
@@ -2463,15 +2444,15 @@ async def construir_texto_ficha_orma(captura):
     )
 
     if oficial:
-        condicion = "âœ… BOT OFICIAL Â· EXENTO DE RAÃZ"
+        condicion = "✅ BOT OFICIAL · EXENTO DE RAÍZ"
     elif progreso == f"{total}/{total}":
-        condicion = "ðŸŸ¢ HABILITADO"
+        condicion = "🟢 HABILITADO"
     elif progreso == "No aplica":
-        condicion = "âšª IDENTIDAD DE CHAT/CANAL"
+        condicion = "⚪ IDENTIDAD DE CHAT/CANAL"
     elif progreso == "No disponible":
-        condicion = "ðŸŸ¡ ESTADO NO DISPONIBLE"
+        condicion = "🟡 ESTADO NO DISPONIBLE"
     else:
-        condicion = f"ðŸ”´ MEMBRESÃA INCOMPLETA Â· faltan {faltantes}"
+        condicion = f"🔴 MEMBRESÍA INCOMPLETA · faltan {faltantes}"
 
     resumen = obtener_resumen_identidad_orma(
         captura["objetivo_tipo"],
@@ -2501,55 +2482,55 @@ async def construir_texto_ficha_orma(captura):
     )
 
     return (
-        "ðŸ›¡ï¸ <b>FICHA AVANZADA /ORMA</b>\n\n"
+        "🛡️ <b>FICHA AVANZADA /ORMA</b>\n\n"
 
-        "ðŸ‘¤ <b>IDENTIDAD</b>\n"
-        f"â€¢ Nombre: <b>{nombre}</b>\n"
-        f"â€¢ Usuario: <b>{username}</b>\n"
-        f"â€¢ ID: <code>{objetivo_id}</code>\n"
-        f"â€¢ Tipo: <b>{captura['objetivo_tipo']}</b>\n"
-        f"â€¢ Rol en grupo origen: <b>{rol}</b>\n\n"
+        "👤 <b>IDENTIDAD</b>\n"
+        f"• Nombre: <b>{nombre}</b>\n"
+        f"• Usuario: <b>{username}</b>\n"
+        f"• ID: <code>{objetivo_id}</code>\n"
+        f"• Tipo: <b>{captura['objetivo_tipo']}</b>\n"
+        f"• Rol en grupo origen: <b>{rol}</b>\n\n"
 
-        "ðŸ” <b>ESTADO GENERAL</b>\n"
-        f"â€¢ MembresÃ­a: <b>{progreso}</b>\n"
-        f"â€¢ CondiciÃ³n: <b>{condicion}</b>\n"
-        f"â€¢ Control publicidad: <b>{modo_publicidad}</b>\n\n"
+        "🔐 <b>ESTADO GENERAL</b>\n"
+        f"• Membresía: <b>{progreso}</b>\n"
+        f"• Condición: <b>{condicion}</b>\n"
+        f"• Control publicidad: <b>{modo_publicidad}</b>\n\n"
 
-        "ðŸ“Š <b>ACTIVIDAD OBSERVADA</b>\n"
-        f"â€¢ Ãšltima hora: <b>{resumen['actividad_hora']}</b>\n"
-        f"â€¢ Hoy: <b>{resumen['actividad_dia']}</b>\n"
-        f"â€¢ Semana: <b>{resumen['actividad_semana']}</b>\n"
-        f"â€¢ Mes: <b>{resumen['actividad_mes']}</b>\n"
-        f"â€¢ Total registrado: <b>{resumen['actividad_total']}</b>\n\n"
+        "📊 <b>ACTIVIDAD OBSERVADA</b>\n"
+        f"• Última hora: <b>{resumen['actividad_hora']}</b>\n"
+        f"• Hoy: <b>{resumen['actividad_dia']}</b>\n"
+        f"• Semana: <b>{resumen['actividad_semana']}</b>\n"
+        f"• Mes: <b>{resumen['actividad_mes']}</b>\n"
+        f"• Total registrado: <b>{resumen['actividad_total']}</b>\n\n"
 
-        "ðŸ“£ <b>PUBLICIDAD REGISTRADA</b>\n"
-        f"â€¢ Total evaluada: <b>{resumen['publicidad_total']}</b>\n"
-        f"â€¢ Permitida: <b>{resumen['publicidad_permitida']}</b>\n"
-        f"â€¢ Rechazada/controlada: <b>{resumen['publicidad_bloqueada']}</b>\n"
-        f"â€¢ Ãšltima hora: <b>{resumen['ritmo_publicidad']['ultima_hora']}</b> "
-        f"(âœ… {resumen['ritmo_publicidad']['permitidas_hora']} Â· "
-        f"â›” {resumen['ritmo_publicidad']['rechazadas_hora']})\n"
-        f"â€¢ Ãšltimas 24 h: <b>{resumen['ritmo_publicidad']['ultimas_24h']}</b>\n"
-        f"â€¢ Ritmo promedio: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['frecuencia']}</b>\n"
-        f"â€¢ Ãšltimo intervalo: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['ultimo_intervalo']}</b>\n"
-        f"â€¢ Ãšltima publicidad: <b>{formatear_fecha_peru(resumen['ritmo_publicidad']['ultima_publicidad'])}</b>\n\n"
+        "📣 <b>PUBLICIDAD REGISTRADA</b>\n"
+        f"• Total evaluada: <b>{resumen['publicidad_total']}</b>\n"
+        f"• Permitida: <b>{resumen['publicidad_permitida']}</b>\n"
+        f"• Rechazada/controlada: <b>{resumen['publicidad_bloqueada']}</b>\n"
+        f"• Última hora: <b>{resumen['ritmo_publicidad']['ultima_hora']}</b> "
+        f"(✅ {resumen['ritmo_publicidad']['permitidas_hora']} · "
+        f"⛔ {resumen['ritmo_publicidad']['rechazadas_hora']})\n"
+        f"• Últimas 24 h: <b>{resumen['ritmo_publicidad']['ultimas_24h']}</b>\n"
+        f"• Ritmo promedio: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['frecuencia']}</b>\n"
+        f"• Último intervalo: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['ultimo_intervalo']}</b>\n"
+        f"• Última publicidad: <b>{formatear_fecha_peru(resumen['ritmo_publicidad']['ultima_publicidad'])}</b>\n\n"
 
-        "ðŸšª <b>MOVIMIENTOS OBSERVADOS</b>\n"
-        f"â€¢ Entradas: <b>{resumen['entradas']}</b>\n"
-        f"â€¢ Salidas: <b>{resumen['salidas']}</b>\n"
-        f"â€¢ Primera entrada: <b>{formatear_fecha_peru(resumen['primera_entrada'])}</b>\n"
-        f"â€¢ Ãšltima entrada: <b>{formatear_fecha_peru(resumen['ultima_entrada'])}</b>\n"
-        f"â€¢ Ãšltima salida: <b>{formatear_fecha_peru(resumen['ultima_salida'])}</b>\n\n"
+        "🚪 <b>MOVIMIENTOS OBSERVADOS</b>\n"
+        f"• Entradas: <b>{resumen['entradas']}</b>\n"
+        f"• Salidas: <b>{resumen['salidas']}</b>\n"
+        f"• Primera entrada: <b>{formatear_fecha_peru(resumen['primera_entrada'])}</b>\n"
+        f"• Última entrada: <b>{formatear_fecha_peru(resumen['ultima_entrada'])}</b>\n"
+        f"• Última salida: <b>{formatear_fecha_peru(resumen['ultima_salida'])}</b>\n\n"
 
-        "ðŸ• <b>SEGUIMIENTO</b>\n"
-        f"â€¢ Primera observaciÃ³n: <b>{formatear_fecha_peru(primera_observacion)}</b>\n"
-        f"â€¢ Ãšltima actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>\n"
-        f"â€¢ Capturas /orma: <b>{capturas_totales}</b>\n\n"
+        "🕐 <b>SEGUIMIENTO</b>\n"
+        f"• Primera observación: <b>{formatear_fecha_peru(primera_observacion)}</b>\n"
+        f"• Última actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>\n"
+        f"• Capturas /orma: <b>{capturas_totales}</b>\n\n"
 
-        "ðŸ“ <b>ORIGEN DE ESTA CAPTURA</b>\n"
-        f"â€¢ Grupo: <b>{captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']}</b>\n"
-        f"â€¢ Mensaje: <code>{captura['mensaje_origen_id']}</code>\n"
-        f"â€¢ Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>\n\n"
+        "📍 <b>ORIGEN DE ESTA CAPTURA</b>\n"
+        f"• Grupo: <b>{captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']}</b>\n"
+        f"• Mensaje: <code>{captura['mensaje_origen_id']}</code>\n"
+        f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>\n\n"
 
         "Selecciona una herramienta."
     )
@@ -2665,15 +2646,15 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         try:
             await safe_query_edit_message(query,
-                "ðŸ›¡ï¸ <b>MÃXIMO CONTROL GROUP</b>\n\n"
-                "Centro privado de administraciÃ³n.\n\n"
-                "ðŸ“Œ Responde cualquier mensaje en un grupo controlado "
+                "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
+                "Centro privado de administración.\n\n"
+                "📌 Responde cualquier mensaje en un grupo controlado "
                 "con <code>/orma</code> para abrir su expediente.\n\n"
-                "Los comandos y datos escritos se eliminan automÃ¡ticamente "
-                "despuÃ©s de ser procesados.",
+                "Los comandos y datos escritos se eliminan automáticamente "
+                "después de ser procesados.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("ðŸ—‘ CERRAR", callback_data="orma_cerrar")
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
                 ]]),
             )
         except TelegramError:
@@ -2705,32 +2686,32 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
             texto_membresia = (
-                "ðŸ” <b>MEMBRESÃA</b>\n\n"
+                "🔐 <b>MEMBRESÍA</b>\n\n"
                 "Esta identidad es un canal/chat y no puede evaluarse con la regla de usuario 7/7."
             )
         else:
             estado = await obtener_estado_membresia_7de7(captura["objetivo_id"])
             lineas = [
-                "ðŸ” <b>MEMBRESÃA 7/7</b>", "",
+                "🔐 <b>MEMBRESÍA 7/7</b>", "",
                 f"Progreso: <b>{len(estado['completados'])}/{estado['total']}</b>", "",
             ]
             if estado["completo"]:
-                lineas.append("âœ… Pertenece a los 7 grupos oficiales.")
+                lineas.append("✅ Pertenece a los 7 grupos oficiales.")
             else:
-                lineas.append("âŒ <b>Grupos faltantes:</b>")
+                lineas.append("❌ <b>Grupos faltantes:</b>")
                 for grupo in estado["faltantes"]:
-                    lineas.append(f"â€¢ {grupo['nombre']}")
+                    lineas.append(f"• {grupo['nombre']}")
             texto_membresia = "\n".join(lineas)
 
         await safe_query_edit_message(query,
             texto_membresia,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("ðŸ”„ VERIFICAR AHORA", callback_data=f"orma_membresia:{captura_id}")],
-                [InlineKeyboardButton("â¬…ï¸ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")],
+                [InlineKeyboardButton("🔄 VERIFICAR AHORA", callback_data=f"orma_membresia:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")],
                 [
-                    InlineKeyboardButton("ðŸ  MENÃš PRINCIPAL", callback_data="orma_menu_principal"),
-                    InlineKeyboardButton("ðŸ—‘ CERRAR", callback_data="orma_cerrar"),
+                    InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
                 ],
             ]),
         )
@@ -2756,34 +2737,34 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         lineas = [
-            "ðŸ“Š <b>ACTIVIDAD REGISTRADA</b>",
+            "📊 <b>ACTIVIDAD REGISTRADA</b>",
             "",
-            "ðŸ• <b>Volumen</b>",
-            f"â€¢ Ãšltima hora: <b>{resumen['hora']}</b>",
-            f"â€¢ Hoy: <b>{resumen['dia']}</b>",
-            f"â€¢ Semana: <b>{resumen['semana']}</b>",
-            f"â€¢ Mes: <b>{resumen['mes']}</b>",
+            "🕐 <b>Volumen</b>",
+            f"• Última hora: <b>{resumen['hora']}</b>",
+            f"• Hoy: <b>{resumen['dia']}</b>",
+            f"• Semana: <b>{resumen['semana']}</b>",
+            f"• Mes: <b>{resumen['mes']}</b>",
             "",
-            "ðŸ“¦ <b>Tipos de contenido este mes</b>",
+            "📦 <b>Tipos de contenido este mes</b>",
         ]
 
         if resumen["tipos_mes"]:
             for fila in resumen["tipos_mes"][:8]:
                 lineas.append(
-                    f"â€¢ {fila['tipo_contenido']}: <b>{fila['total']}</b>"
+                    f"• {fila['tipo_contenido']}: <b>{fila['total']}</b>"
                 )
         else:
-            lineas.append("â€¢ Sin actividad registrada todavÃ­a.")
+            lineas.append("• Sin actividad registrada todavía.")
 
-        lineas.extend(["", "ðŸ“ <b>Actividad por grupo este mes</b>"])
+        lineas.extend(["", "📍 <b>Actividad por grupo este mes</b>"])
 
         if resumen["grupos_mes"]:
             for fila in resumen["grupos_mes"][:7]:
                 lineas.append(
-                    f"â€¢ {fila['grupo']}: <b>{fila['total']}</b>"
+                    f"• {fila['grupo']}: <b>{fila['total']}</b>"
                 )
         else:
-            lineas.append("â€¢ Sin actividad registrada todavÃ­a.")
+            lineas.append("• Sin actividad registrada todavía.")
 
         ritmo_pub = resumen_frecuencia_publicidad_db(
             captura["objetivo_tipo"],
@@ -2793,30 +2774,30 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lineas.extend([
             "",
-            "ðŸ“£ <b>Ritmo publicitario observado</b>",
-            f"â€¢ Ãšltima hora: <b>{ritmo_pub['ultima_hora']}</b>",
-            f"â€¢ Permitidas Ãºltima hora: <b>{ritmo_pub['permitidas_hora']}</b>",
-            f"â€¢ Rechazadas Ãºltima hora: <b>{ritmo_pub['rechazadas_hora']}</b>",
-            f"â€¢ Ãšltimas 24 h: <b>{ritmo_pub['ultimas_24h']}</b>",
-            f"â€¢ Promedio equivalente / hora (24 h): "
+            "📣 <b>Ritmo publicitario observado</b>",
+            f"• Última hora: <b>{ritmo_pub['ultima_hora']}</b>",
+            f"• Permitidas última hora: <b>{ritmo_pub['permitidas_hora']}</b>",
+            f"• Rechazadas última hora: <b>{ritmo_pub['rechazadas_hora']}</b>",
+            f"• Últimas 24 h: <b>{ritmo_pub['ultimas_24h']}</b>",
+            f"• Promedio equivalente / hora (24 h): "
             f"<b>{ritmo_pub['promedio_por_hora_24h']}</b>",
-            f"â€¢ Frecuencia promedio: <b>{ritmo_txt['frecuencia']}</b>",
-            f"â€¢ Ãšltimo intervalo: <b>{ritmo_txt['ultimo_intervalo']}</b>",
-            f"â€¢ Ãšltima publicidad: "
+            f"• Frecuencia promedio: <b>{ritmo_txt['frecuencia']}</b>",
+            f"• Último intervalo: <b>{ritmo_txt['ultimo_intervalo']}</b>",
+            f"• Última publicidad: "
             f"<b>{formatear_fecha_peru(ritmo_pub['ultima_publicidad'])}</b>",
         ])
 
         if ritmo_pub["grupos_hora"]:
-            lineas.extend(["", "ðŸ“ <b>Publicidad por grupo Â· Ãºltima hora</b>"])
+            lineas.extend(["", "📍 <b>Publicidad por grupo · última hora</b>"])
             for fila in ritmo_pub["grupos_hora"][:7]:
                 lineas.append(
-                    f"â€¢ {fila['grupo']}: <b>{fila['total']}</b>"
+                    f"• {fila['grupo']}: <b>{fila['total']}</b>"
                 )
 
         lineas.extend([
             "",
-            "â„¹ï¸ La frecuencia se calcula con publicidad detectada por "
-            "MÃ¡ximo Control, incluida la que haya sido rechazada por reglas. "
+            "ℹ️ La frecuencia se calcula con publicidad detectada por "
+            "Máximo Control, incluida la que haya sido rechazada por reglas. "
             "El historial empieza desde que el sistema registra estos eventos.",
         ])
 
@@ -2826,23 +2807,23 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "ðŸ”„ ACTUALIZAR",
+                        "🔄 ACTUALIZAR",
                         callback_data=f"orma_actividad:{captura_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "â¬…ï¸ RETROCEDER",
+                        "⬅️ RETROCEDER",
                         callback_data=f"orma_ficha:{captura_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "ðŸ  MENÃš PRINCIPAL",
+                        "🏠 MENÚ PRINCIPAL",
                         callback_data="orma_menu_principal",
                     ),
                     InlineKeyboardButton(
-                        "ðŸ—‘ CERRAR",
+                        "🗑 CERRAR",
                         callback_data="orma_cerrar",
                     ),
                 ],
@@ -2866,45 +2847,45 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
             lineas = [
-                "ðŸšª <b>ENTRADAS / SALIDAS</b>",
+                "🚪 <b>ENTRADAS / SALIDAS</b>",
                 "",
                 "Esta identidad es un canal/chat y no tiene historial "
-                "de membresÃ­a de usuario.",
+                "de membresía de usuario.",
             ]
         else:
             resumen = resumen_movimientos_db(captura["objetivo_id"])
 
             lineas = [
-                "ðŸšª <b>ENTRADAS / SALIDAS</b>",
+                "🚪 <b>ENTRADAS / SALIDAS</b>",
                 "",
-                f"âž• Entradas registradas: <b>{resumen['entradas']}</b>",
-                f"âž– Salidas registradas: <b>{resumen['salidas']}</b>",
+                f"➕ Entradas registradas: <b>{resumen['entradas']}</b>",
+                f"➖ Salidas registradas: <b>{resumen['salidas']}</b>",
                 "",
-                f"ðŸŸ¢ Primera entrada observada: "
+                f"🟢 Primera entrada observada: "
                 f"<b>{formatear_fecha_peru(resumen['primera_entrada'])}</b>",
-                f"ðŸ”„ Ãšltima entrada: "
+                f"🔄 Última entrada: "
                 f"<b>{formatear_fecha_peru(resumen['ultima_entrada'])}</b>",
-                f"ðŸ”´ Ãšltima salida: "
+                f"🔴 Última salida: "
                 f"<b>{formatear_fecha_peru(resumen['ultima_salida'])}</b>",
                 "",
-                "ðŸ“ <b>Por grupo</b>",
+                "📍 <b>Por grupo</b>",
             ]
 
             if resumen["por_grupo"]:
                 for fila in resumen["por_grupo"][:7]:
                     lineas.append(
-                        f"â€¢ {fila['grupo']}: "
-                        f"âž• {int(fila['entradas'] or 0)} Â· "
-                        f"âž– {int(fila['salidas'] or 0)}"
+                        f"• {fila['grupo']}: "
+                        f"➕ {int(fila['entradas'] or 0)} · "
+                        f"➖ {int(fila['salidas'] or 0)}"
                     )
             else:
-                lineas.append("â€¢ Sin movimientos registrados todavÃ­a.")
+                lineas.append("• Sin movimientos registrados todavía.")
 
-            # Dato de seguimiento Ãºtil sin inventar historial anterior.
+            # Dato de seguimiento útil sin inventar historial anterior.
             if resumen["ultima_entrada"] and not resumen["ultima_salida"]:
-                estado_mov = "ðŸŸ¢ Ãšltimo movimiento registrado: ENTRADA"
+                estado_mov = "🟢 Último movimiento registrado: ENTRADA"
             elif resumen["ultima_salida"] and not resumen["ultima_entrada"]:
-                estado_mov = "ðŸ”´ Ãšltimo movimiento registrado: SALIDA"
+                estado_mov = "🔴 Último movimiento registrado: SALIDA"
             elif resumen["ultima_entrada"] and resumen["ultima_salida"]:
                 try:
                     fe = datetime.fromisoformat(resumen["ultima_entrada"])
@@ -2914,21 +2895,21 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if fs.tzinfo is None:
                         fs = fs.replace(tzinfo=timezone.utc)
                     estado_mov = (
-                        "ðŸŸ¢ Ãšltimo movimiento registrado: ENTRADA"
+                        "🟢 Último movimiento registrado: ENTRADA"
                         if fe > fs
-                        else "ðŸ”´ Ãšltimo movimiento registrado: SALIDA"
+                        else "🔴 Último movimiento registrado: SALIDA"
                     )
                 except (TypeError, ValueError):
-                    estado_mov = "âšª Ãšltimo movimiento: No disponible"
+                    estado_mov = "⚪ Último movimiento: No disponible"
             else:
-                estado_mov = "âšª Sin movimientos observados todavÃ­a"
+                estado_mov = "⚪ Sin movimientos observados todavía"
 
             lineas.extend([
                 "",
                 f"<b>{estado_mov}</b>",
                 "",
-                "â„¹ï¸ Solo se contabilizan movimientos observados desde "
-                "la activaciÃ³n de este registro; no se inventa historial anterior.",
+                "ℹ️ Solo se contabilizan movimientos observados desde "
+                "la activación de este registro; no se inventa historial anterior.",
             ])
 
         await safe_query_edit_message(query,
@@ -2937,23 +2918,23 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "ðŸ”„ ACTUALIZAR",
+                        "🔄 ACTUALIZAR",
                         callback_data=f"orma_movimientos:{captura_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "â¬…ï¸ RETROCEDER",
+                        "⬅️ RETROCEDER",
                         callback_data=f"orma_ficha:{captura_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "ðŸ  MENÃš PRINCIPAL",
+                        "🏠 MENÚ PRINCIPAL",
                         callback_data="orma_menu_principal",
                     ),
                     InlineKeyboardButton(
-                        "ðŸ—‘ CERRAR",
+                        "🗑 CERRAR",
                         callback_data="orma_cerrar",
                     ),
                 ],
@@ -2985,9 +2966,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         captura_id = int(data.split(":", 1)[1])
         await query.answer()
         await safe_query_edit_message(query,
-            "âš™ï¸ <b>MODO DE CONTROL</b>\\n\\n"
-            "HEREDADO: usarÃ¡ la regla global cuando la activemos.\\n"
-            "PERSONALIZADO: aplica lÃ­mites propios.\\n"
+            "⚙️ <b>MODO DE CONTROL</b>\\n\\n"
+            "HEREDADO: usará la regla global cuando la activemos.\\n"
+            "PERSONALIZADO: aplica límites propios.\\n"
             "ILIMITADO: registra pero no limita.\\n"
             "BLOQUEADO: elimina toda publicidad controlable.\\n"
             "EXCLUIDO: no aplica control publicitario.",
@@ -3004,10 +2985,10 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     InlineKeyboardButton("EXCLUIDO", callback_data=f"orma_pub_setmodo:{captura_id}:EXCLUIDO"),
                 ],
-                [InlineKeyboardButton("â¬…ï¸ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
                 [
-                    InlineKeyboardButton("ðŸ  MENÃš PRINCIPAL", callback_data="orma_menu_principal"),
-                    InlineKeyboardButton("ðŸ—‘ CERRAR", callback_data="orma_cerrar"),
+                    InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
                 ],
             ]),
         )
@@ -3042,14 +3023,14 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         captura_id = int(data.split(":", 1)[1])
         await query.answer()
         await safe_query_edit_message(query,
-            "â± <b>SEPARACIÃ“N ENTRE PUBLICIDADES</b>\\n\\n"
-            "Selecciona el tiempo mÃ­nimo entre una publicidad permitida "
+            "⏱ <b>SEPARACIÓN ENTRE PUBLICIDADES</b>\\n\\n"
+            "Selecciona el tiempo mínimo entre una publicidad permitida "
             "y la siguiente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "SIN SEPARACIÃ“N",
+                        "SIN SEPARACIÓN",
                         callback_data=f"orma_pub_setsep:{captura_id}:none",
                     ),
                 ],
@@ -3063,9 +3044,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("1 h", callback_data=f"orma_pub_setsep:{captura_id}:3600"),
                 ],
                 [
-                    InlineKeyboardButton("âœï¸ PERSONALIZAR MINUTOS", callback_data=f"orma_pub_input:{captura_id}:separacion_minutos"),
+                    InlineKeyboardButton("✍️ PERSONALIZAR MINUTOS", callback_data=f"orma_pub_input:{captura_id}:separacion_minutos"),
                 ],
-                [InlineKeyboardButton("â¬…ï¸ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
             ]),
         )
         return
@@ -3085,7 +3066,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             modo="PERSONALIZADO",
             separacion_segundos=segundos,
         )
-        await query.answer("SeparaciÃ³n actualizada")
+        await query.answer("Separación actualizada")
         cfg = obtener_control_identidad_db(
             captura["objetivo_tipo"],
             captura["objetivo_id"],
@@ -3106,29 +3087,29 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
         await safe_query_edit_message(query,
-            "ðŸ”¢ <b>LÃMITES DE PUBLICIDAD</b>\\n\\n"
+            "🔢 <b>LÍMITES DE PUBLICIDAD</b>\\n\\n"
             f"Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b>\\n"
-            f"DÃ­a: <b>{texto_valor_limite(cfg['limite_dia'])}</b>\\n"
+            f"Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b>\\n"
             f"Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b>\\n"
             f"Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b>\\n"
-            f"AÃ±o: <b>{texto_valor_limite(cfg['limite_anio'])}</b>\\n\\n"
-            "Pulsa un periodo y escribe el mÃ¡ximo. "
-            "El nÃºmero escrito se borrarÃ¡ automÃ¡ticamente.",
+            f"Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b>\\n\\n"
+            "Pulsa un periodo y escribe el máximo. "
+            "El número escrito se borrará automáticamente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("HORA", callback_data=f"orma_pub_input:{captura_id}:limite_hora"),
-                    InlineKeyboardButton("DÃA", callback_data=f"orma_pub_input:{captura_id}:limite_dia"),
+                    InlineKeyboardButton("DÍA", callback_data=f"orma_pub_input:{captura_id}:limite_dia"),
                 ],
                 [
                     InlineKeyboardButton("SEMANA", callback_data=f"orma_pub_input:{captura_id}:limite_semana"),
                     InlineKeyboardButton("MES", callback_data=f"orma_pub_input:{captura_id}:limite_mes"),
-                    InlineKeyboardButton("AÃ‘O", callback_data=f"orma_pub_input:{captura_id}:limite_anio"),
+                    InlineKeyboardButton("AÑO", callback_data=f"orma_pub_input:{captura_id}:limite_anio"),
                 ],
                 [
-                    InlineKeyboardButton("â™¾ QUITAR TODOS LOS LÃMITES", callback_data=f"orma_pub_sinlimites:{captura_id}"),
+                    InlineKeyboardButton("♾ QUITAR TODOS LOS LÍMITES", callback_data=f"orma_pub_sinlimites:{captura_id}"),
                 ],
-                [InlineKeyboardButton("â¬…ï¸ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
             ]),
         )
         return
@@ -3146,7 +3127,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             limite_mes=None,
             limite_anio=None,
         )
-        await query.answer("LÃ­mites eliminados")
+        await query.answer("Límites eliminados")
         cfg = obtener_control_identidad_db(
             captura["objetivo_tipo"],
             captura["objetivo_id"],
@@ -3168,12 +3149,12 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
 
         def marca(campo):
-            return "âœ…" if bool(cfg[campo]) else "âŒ"
+            return "✅" if bool(cfg[campo]) else "❌"
 
         await safe_query_edit_message(query,
-            "ðŸŽ› <b>TIPOS CONTROLADOS</b>\\n\\n"
-            "âœ… = entra al control de cupos/separaciÃ³n\\n"
-            "âŒ = queda libre para esta identidad\\n\\n"
+            "🎛 <b>TIPOS CONTROLADOS</b>\\n\\n"
+            "✅ = entra al control de cupos/separación\\n"
+            "❌ = queda libre para esta identidad\\n\\n"
             "El texto normal puro siempre permanece libre.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -3191,7 +3172,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     InlineKeyboardButton(f"{marca('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pub_toggle:{captura_id}:controlar_custom_emoji"),
                 ],
-                [InlineKeyboardButton("â¬…ï¸ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
             ]),
         )
         return
@@ -3216,19 +3197,19 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer("Actualizado")
 
-        # Reabrir submenÃº tipos.
+        # Reabrir submenú tipos.
         cfg = obtener_control_identidad_db(
             captura["objetivo_tipo"],
             captura["objetivo_id"],
         )
 
         def marca(c):
-            return "âœ…" if bool(cfg[c]) else "âŒ"
+            return "✅" if bool(cfg[c]) else "❌"
 
         await safe_query_edit_message(query,
-            "ðŸŽ› <b>TIPOS CONTROLADOS</b>\\n\\n"
-            "âœ… = entra al control de cupos/separaciÃ³n\\n"
-            "âŒ = queda libre para esta identidad\\n\\n"
+            "🎛 <b>TIPOS CONTROLADOS</b>\\n\\n"
+            "✅ = entra al control de cupos/separación\\n"
+            "❌ = queda libre para esta identidad\\n\\n"
             "El texto normal puro siempre permanece libre.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -3246,7 +3227,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     InlineKeyboardButton(f"{marca('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pub_toggle:{captura_id}:controlar_custom_emoji"),
                 ],
-                [InlineKeyboardButton("â¬…ï¸ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
             ]),
         )
         return
@@ -3284,30 +3265,30 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
         etiqueta = {
-            "separacion_minutos": "minutos de separaciÃ³n",
-            "limite_hora": "mÃ¡ximo por hora",
-            "limite_dia": "mÃ¡ximo por dÃ­a",
-            "limite_semana": "mÃ¡ximo por semana",
-            "limite_mes": "mÃ¡ximo por mes",
-            "limite_anio": "mÃ¡ximo por aÃ±o",
+            "separacion_minutos": "minutos de separación",
+            "limite_hora": "máximo por hora",
+            "limite_dia": "máximo por día",
+            "limite_semana": "máximo por semana",
+            "limite_mes": "máximo por mes",
+            "limite_anio": "máximo por año",
         }.get(campo, "valor")
 
         await safe_query_edit_message(query,
-            "âœï¸ <b>VALOR PERSONALIZADO</b>\\n\\n"
+            "✍️ <b>VALOR PERSONALIZADO</b>\\n\\n"
             f"Escribe ahora el <b>{etiqueta}</b>.\\n\\n"
-            "EnvÃ­a un nÃºmero entero igual o mayor que 0. "
-            "Tu mensaje se eliminarÃ¡ automÃ¡ticamente.",
+            "Envía un número entero igual o mayor que 0. "
+            "Tu mensaje se eliminará automáticamente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "âŒ CANCELAR",
+                        "❌ CANCELAR",
                         callback_data=f"orma_pub_cancelinput:{captura_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "â¬…ï¸ RETROCEDER",
+                        "⬅️ RETROCEDER",
                         callback_data=f"orma_publicidad:{captura_id}",
                     )
                 ],
@@ -3360,7 +3341,7 @@ async def control_publicidad_individual_grupos(
         username = usuario.username
         nombre = nombre_visible_usuario(usuario)
 
-        # La membresÃ­a 7/7 sigue siendo la primera puerta.
+        # La membresía 7/7 sigue siendo la primera puerta.
         estado = await obtener_estado_membresia_7de7(usuario.id)
         if not estado["completo"]:
             return
@@ -3446,7 +3427,7 @@ async def registrar_actividad_grupo(
     ):
         return
 
-    # Los comandos operativos no forman parte de las mÃ©tricas de actividad.
+    # Los comandos operativos no forman parte de las métricas de actividad.
     if getattr(mensaje, "text", None) and mensaje.text.startswith("/"):
         return
 
@@ -3531,15 +3512,15 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         texto = (
-            "ðŸ›¡ï¸ <b>MÃXIMO CONTROL GROUP</b>\n\n"
-            "Centro privado de administraciÃ³n.\n\n"
-            "ðŸ“Œ Responde cualquier mensaje en cualquiera de los grupos "
+            "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
+            "Centro privado de administración.\n\n"
+            "📌 Responde cualquier mensaje en cualquiera de los grupos "
             "controlados con <code>/orma</code> para abrir su expediente.\n\n"
-            "ðŸ§¹ Los comandos y datos operativos se eliminan "
-            "automÃ¡ticamente para mantener el panel limpio."
+            "🧹 Los comandos y datos operativos se eliminan "
+            "automáticamente para mantener el panel limpio."
         )
         teclado = InlineKeyboardMarkup([[
-            InlineKeyboardButton("ðŸ—‘ CERRAR", callback_data="orma_cerrar")
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
         ]])
 
         panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
@@ -3573,11 +3554,11 @@ async def maximo_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await mensaje.reply_text(
-        "âœ… MaximoControlGroup operativo\n"
-        "ðŸ” MembresÃ­a: 7/7 activa\n"
-        "ðŸŒ ModeraciÃ³n: 7 grupos oficiales + @Orma_Pruebas\n"
-        "ðŸŒ Regla 7/7: usuarios, administradores y bots externos\n"        "âœ… Bots oficiales: excluidos de raÃ­z\n"        "ðŸš« Castigos/baneos: desactivados\n"
-        "ðŸ›¡ï¸ Control publicitario general: pendiente"
+        "✅ MaximoControlGroup operativo\n"
+        "🔐 Membresía: 7/7 activa\n"
+        "🌐 Moderación: 7 grupos oficiales + @Orma_Pruebas\n"
+        "🌐 Regla 7/7: usuarios, administradores y bots externos\n"        "✅ Bots oficiales: excluidos de raíz\n"        "🚫 Castigos/baneos: desactivados\n"
+        "🛡️ Control publicitario general: pendiente"
     )
 
 
@@ -3598,8 +3579,8 @@ async def control_membresia_grupos(
     ):
         return
 
-    # ÃšNICA EXCEPCIÃ“N: bots oficiales definidos de raÃ­z.
-    # Todo lo demÃ¡s (usuarios, administradores y bots externos) cumple 7/7.
+    # ÚNICA EXCEPCIÓN: bots oficiales definidos de raíz.
+    # Todo lo demás (usuarios, administradores y bots externos) cumple 7/7.
     if es_bot_oficial_exento(usuario):
         return
 
@@ -3626,7 +3607,7 @@ async def control_membresia_grupos(
 
     if union_iniciado:
         # Mantiene actualizado su panel privado, pero el aviso del grupo
-        # tambiÃ©n aparece durante 2 minutos segÃºn la regla 7/7 definida.
+        # también aparece durante 2 minutos según la regla 7/7 definida.
         await mostrar_o_actualizar_panel_union(usuario.id)
 
     await mostrar_aviso_union_temporal(
@@ -3718,7 +3699,7 @@ async def procesar_entrada_control_publicidad(
     if not entrada:
         return
 
-    # Cualquier texto/nÃºmero escrito para operar el panel desaparece.
+    # Cualquier texto/número escrito para operar el panel desaparece.
     try:
         await mensaje.delete()
     except TelegramError:
@@ -3739,14 +3720,14 @@ async def procesar_entrada_control_publicidad(
                     chat_id=usuario.id,
                     message_id=panel_id,
                     text=(
-                        "âŒ <b>VALOR NO VÃLIDO</b>\\n\\n"
-                        "Escribe Ãºnicamente un nÃºmero entero igual o mayor que 0.\\n"
-                        "El mensaje serÃ¡ eliminado automÃ¡ticamente."
+                        "❌ <b>VALOR NO VÁLIDO</b>\\n\\n"
+                        "Escribe únicamente un número entero igual o mayor que 0.\\n"
+                        "El mensaje será eliminado automáticamente."
                     ),
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton(
-                            "âŒ CANCELAR",
+                            "❌ CANCELAR",
                             callback_data=f"orma_pub_cancelinput:{entrada['captura_id']}",
                         )
                     ]]),
@@ -3821,7 +3802,7 @@ async def union_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         union_bot_iniciado=True,
     )
 
-    # Si el usuario llegÃ³ desde el botÃ³n del aviso del grupo,
+    # Si el usuario llegó desde el botón del aviso del grupo,
     # eliminamos ese aviso inmediatamente al recibir el /start.
     await borrar_aviso_origen_desde_payload(
         context,
@@ -3854,7 +3835,7 @@ async def union_verificar_callback(
     if not query or not usuario:
         return
 
-    await query.answer("Verificando los 7 gruposâ€¦")
+    await query.answer("Verificando los 7 grupos…")
 
     registrar_usuario_membresia(
         usuario,
@@ -3899,7 +3880,7 @@ async def union_mi_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     respuesta = await context.bot.send_message(
         chat_id=usuario.id,
-        text=f"ðŸ†” Tu ID de Telegram es: <code>{usuario.id}</code>",
+        text=f"🆔 Tu ID de Telegram es: <code>{usuario.id}</code>",
         parse_mode="HTML",
     )
     asyncio.create_task(eliminar_mensaje_despues(respuesta, 60))
@@ -3985,7 +3966,7 @@ async def iniciar_aplicacion(application: Application):
     await application.start()
 
     if application.updater is None:
-        raise RuntimeError("La aplicaciÃ³n no tiene Updater disponible.")
+        raise RuntimeError("La aplicación no tiene Updater disponible.")
 
     await application.updater.start_polling(
         allowed_updates=Update.ALL_TYPES,
@@ -4077,11 +4058,11 @@ async def main():
 
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")
-    logging.info("MembresÃ­a obligatoria configurada: 7/7.")
+    logging.info("Membresía obligatoria configurada: 7/7.")
     logging.info("Regla 7/7 universal activa en los 7 grupos oficiales.")
     logging.info("Registro de actividad y movimientos del Bloque 3 activo.")
     logging.info("Control Publicitario Individual del Bloque 4 activo.")
-    logging.info("Bots oficiales exentos de raÃ­z: %s", sorted(BOTS_OFICIALES_EXENTOS))
+    logging.info("Bots oficiales exentos de raíz: %s", sorted(BOTS_OFICIALES_EXENTOS))
     logging.info("@%s permanece como laboratorio de pruebas.", GRUPO_PRUEBAS_USERNAME)
 
     try:

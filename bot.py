@@ -1,10 +1,12 @@
-﻿import os
+import os
 import asyncio
 import logging
 import sqlite3
 import html
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+
+from agente_respaldo_remoto import iniciar_agente_respaldo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatType
@@ -3917,6 +3919,7 @@ async def main():
     global MAXIMO_APP_REF, UNION_APP_REF
 
     inicializar_base_datos()
+    iniciar_agente_respaldo()
 
     maximo_app = Application.builder().token(BOT_TOKEN).build()
     union_app = Application.builder().token(UNION_BOT_TOKEN).build()

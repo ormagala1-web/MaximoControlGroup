@@ -14,7 +14,7 @@ from typing import Optional
 
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
-DATABASE_PATH = DATA_DIR / "publicidad.db"
+DATABASE_PATH = DATA_DIR / "maximo_control.db"
 AGENT_HOST = os.environ.get("BACKUP_AGENT_HOST", "0.0.0.0")
 AGENT_PORT = int(os.environ.get("BACKUP_AGENT_PORT", "8080"))
 AGENT_SECRET = os.environ.get("BACKUP_AGENT_SECRET", "").strip()
@@ -71,9 +71,9 @@ def crear_paquete_remoto() -> tuple[Path, dict]:
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     carpeta_temp = Path(tempfile.mkdtemp(prefix="remote_backup_", dir=DATA_DIR))
-    ruta_db = carpeta_temp / "publicidad.db"
+    ruta_db = carpeta_temp / "maximo_control.db"
     ruta_zip = carpeta_temp / (
-        "PublicidadBot_DB_"
+        "MaximoControlGroup_DB_"
         + ahora_utc().strftime("%Y%m%d_%H%M%S")
         + ".zip"
     )
@@ -82,16 +82,16 @@ def crear_paquete_remoto() -> tuple[Path, dict]:
     validar_sqlite(ruta_db)
 
     manifiesto = {
-        "producto": "PublicidadBot",
+        "producto": "MaximoControlGroup",
         "tipo": "BASE_DATOS_REMOTA",
         "fecha_utc": ahora_utc().isoformat(),
-        "archivo_base": "publicidad.db",
+        "archivo_base": "maximo_control.db",
         "tamano_bytes": ruta_db.stat().st_size,
         "sha256": sha256_archivo(ruta_db),
     }
 
     with zipfile.ZipFile(ruta_zip, "w", zipfile.ZIP_DEFLATED) as paquete:
-        paquete.write(ruta_db, arcname="publicidad.db")
+        paquete.write(ruta_db, arcname="maximo_control.db")
         paquete.writestr(
             "manifest.json",
             json.dumps(manifiesto, ensure_ascii=False, indent=2),
@@ -132,16 +132,16 @@ def inspeccionar_paquete_restore(ruta_zip: Path, carpeta_temp: Path) -> tuple[Pa
             raise RuntimeError(f"manifest.json no es válido: {error}") from error
 
         producto = str(manifiesto.get("producto") or "").strip()
-        if producto.lower() != "publicidadbot":
+        if producto.lower() != "maximocontrolgroup":
             raise RuntimeError(
                 f"El respaldo pertenece a otro producto: {producto or 'desconocido'}."
             )
 
         archivo_base = str(
-            manifiesto.get("archivo_base") or "publicidad.db"
+            manifiesto.get("archivo_base") or "maximo_control.db"
         ).strip()
 
-        if archivo_base != "publicidad.db":
+        if archivo_base != "maximo_control.db":
             raise RuntimeError(
                 f"Archivo de base no permitido: {archivo_base}"
             )
@@ -151,7 +151,7 @@ def inspeccionar_paquete_restore(ruta_zip: Path, carpeta_temp: Path) -> tuple[Pa
                 f"El ZIP no contiene el archivo declarado: {archivo_base}"
             )
 
-        destino_db = carpeta_temp / "publicidad.db"
+        destino_db = carpeta_temp / "maximo_control.db"
         with paquete.open(archivo_base, "r") as origen, destino_db.open("wb") as destino:
             shutil.copyfileobj(origen, destino, length=1024 * 1024)
 
@@ -162,7 +162,7 @@ def inspeccionar_paquete_restore(ruta_zip: Path, carpeta_temp: Path) -> tuple[Pa
 
     if sha_manifest and not hmac.compare_digest(sha_manifest, sha_real):
         raise RuntimeError(
-            "El SHA-256 de publicidad.db no coincide con manifest.json."
+            "El SHA-256 de maximo_control.db no coincide con manifest.json."
         )
 
     tamano_manifest = manifiesto.get("tamano_bytes")
@@ -174,7 +174,7 @@ def inspeccionar_paquete_restore(ruta_zip: Path, carpeta_temp: Path) -> tuple[Pa
 
         if esperado != destino_db.stat().st_size:
             raise RuntimeError(
-                "El tamaño de publicidad.db no coincide con manifest.json."
+                "El tamaño de maximo_control.db no coincide con manifest.json."
             )
 
     manifiesto["_sha256_verificado"] = sha_real
@@ -193,9 +193,9 @@ def crear_respaldo_preventivo() -> tuple[Path, dict]:
     carpeta_temp = Path(
         tempfile.mkdtemp(prefix="preventivo_", dir=RESTORE_BACKUPS_DIR)
     )
-    copia_db = carpeta_temp / "publicidad.db"
+    copia_db = carpeta_temp / "maximo_control.db"
     ruta_zip = RESTORE_BACKUPS_DIR / (
-        f"PublicidadBot_PRE_RESTORE_{marca}.zip"
+        f"MaximoControlGroup_PRE_RESTORE_{marca}.zip"
     )
 
     try:
@@ -203,16 +203,16 @@ def crear_respaldo_preventivo() -> tuple[Path, dict]:
         validar_sqlite(copia_db)
 
         manifiesto = {
-            "producto": "PublicidadBot",
+            "producto": "MaximoControlGroup",
             "tipo": "RESPALDO_PREVENTIVO_RESTAURACION",
             "fecha_utc": ahora_utc().isoformat(),
-            "archivo_base": "publicidad.db",
+            "archivo_base": "maximo_control.db",
             "tamano_bytes": copia_db.stat().st_size,
             "sha256": sha256_archivo(copia_db),
         }
 
         with zipfile.ZipFile(ruta_zip, "w", zipfile.ZIP_DEFLATED) as paquete:
-            paquete.write(copia_db, arcname="publicidad.db")
+            paquete.write(copia_db, arcname="maximo_control.db")
             paquete.writestr(
                 "manifest.json",
                 json.dumps(manifiesto, ensure_ascii=False, indent=2),
@@ -249,7 +249,7 @@ def restaurar_base_desde_zip(
             tempfile.mkdtemp(prefix="remote_restore_", dir=DATA_DIR)
         )
         preventivo_zip = None
-        ruta_rollback = carpeta_temp / "publicidad_rollback.db"
+        ruta_rollback = carpeta_temp / "maximo_control_rollback.db"
         nueva_db = None
 
         try:
@@ -285,7 +285,7 @@ def restaurar_base_desde_zip(
 
             return {
                 "ok": True,
-                "producto": "PublicidadBot",
+                "producto": "MaximoControlGroup",
                 "accion": "BASE_DATOS_RESTAURADA",
                 "fecha_utc": ahora_utc().isoformat(),
                 "archivo_restaurado": str(DATABASE_PATH),
@@ -385,7 +385,7 @@ class ManejadorAgente(BaseHTTPRequestHandler):
             200,
             {
                 "ok": True,
-                "servicio": "PublicidadBot Backup Agent",
+                "servicio": "MaximoControlGroup Backup Agent",
                 "version": "2.0",
                 "base_existe": DATABASE_PATH.is_file(),
                 "restore_disponible": True,
@@ -484,7 +484,7 @@ def iniciar_agente_respaldo() -> None:
     )
     _hilo = threading.Thread(
         target=_servidor.serve_forever,
-        name="PublicidadBackupAgent",
+        name="MaximoControlGroupBackupAgent",
         daemon=True,
     )
     _hilo.start()

@@ -142,6 +142,11 @@ UNION_APP_REF = None
 # Clave: (chat_id, user_id) -> message_id
 AVISOS_MEMBRESIA_ACTIVOS = {}
 
+# Mantiene una referencia fuerte a la tarea de borrado de cada aviso.
+# Sin esta referencia, una tarea creada con asyncio.create_task puede quedar
+# sin dueño antes de cumplir los 60 segundos.
+TAREAS_AVISOS_MEMBRESIA = {}
+
 # Panel privado reutilizable para las capturas /orma.
 PANELES_ORMA = {}
 CAPTURAS_ORMA = {}
@@ -974,14 +979,14 @@ async def eliminar_aviso_membresia_programado(
     message_id,
     segundos,
 ):
+    clave = (chat_id, user_id)
+    tarea_actual = asyncio.current_task()
+
     try:
         await asyncio.sleep(segundos)
 
-        clave = (chat_id, user_id)
-        actual = AVISOS_MEMBRESIA_ACTIVOS.get(clave)
-
         # Solo borra el aviso que siga siendo el vigente para ese usuario/grupo.
-        if actual != message_id:
+        if AVISOS_MEMBRESIA_ACTIVOS.get(clave) != message_id:
             return
 
         try:
@@ -990,12 +995,21 @@ async def eliminar_aviso_membresia_programado(
                 message_id=message_id,
             )
         except TelegramError:
-            pass
-
-        AVISOS_MEMBRESIA_ACTIVOS.pop(clave, None)
+            logging.exception(
+                "No se pudo eliminar aviso de membresía chat=%s user=%s message=%s",
+                chat_id,
+                user_id,
+                message_id,
+            )
+        finally:
+            if AVISOS_MEMBRESIA_ACTIVOS.get(clave) == message_id:
+                AVISOS_MEMBRESIA_ACTIVOS.pop(clave, None)
 
     except asyncio.CancelledError:
-        pass
+        raise
+    finally:
+        if TAREAS_AVISOS_MEMBRESIA.get(clave) is tarea_actual:
+            TAREAS_AVISOS_MEMBRESIA.pop(clave, None)
 
 
 async def mostrar_aviso_union_temporal(
@@ -1009,6 +1023,10 @@ async def mostrar_aviso_union_temporal(
     anterior_id = AVISOS_MEMBRESIA_ACTIVOS.get(clave)
 
     # Evita acumular avisos si insiste varias veces en el mismo grupo.
+    tarea_anterior = TAREAS_AVISOS_MEMBRESIA.pop(clave, None)
+    if tarea_anterior and not tarea_anterior.done():
+        tarea_anterior.cancel()
+
     if anterior_id:
         try:
             await context.bot.delete_message(
@@ -1070,7 +1088,7 @@ async def mostrar_aviso_union_temporal(
 
     AVISOS_MEMBRESIA_ACTIVOS[clave] = aviso.message_id
 
-    asyncio.create_task(
+    tarea_borrado = asyncio.create_task(
         eliminar_aviso_membresia_programado(
             context.bot,
             chat_id,
@@ -1079,6 +1097,7 @@ async def mostrar_aviso_union_temporal(
             AVISO_MEMBRESIA_SEGUNDOS,
         )
     )
+    TAREAS_AVISOS_MEMBRESIA[clave] = tarea_borrado
 
 
 
@@ -3638,7 +3657,7 @@ async def control_membresia_grupos(
 
     if union_iniciado:
         # Mantiene actualizado su panel privado, pero el aviso del grupo
-        # también aparece durante 2 minutos según la regla 7/7 definida.
+        # también aparece durante 1 minuto según la regla 7/7 definida.
         await mostrar_o_actualizar_panel_union(usuario.id)
 
     await mostrar_aviso_union_temporal(
@@ -3708,6 +3727,10 @@ async def borrar_aviso_origen_desde_payload(
     clave = (chat_id, usuario_id)
     if AVISOS_MEMBRESIA_ACTIVOS.get(clave) == message_id:
         AVISOS_MEMBRESIA_ACTIVOS.pop(clave, None)
+
+    tarea = TAREAS_AVISOS_MEMBRESIA.pop(clave, None)
+    if tarea and not tarea.done():
+        tarea.cancel()
 
 
 async def procesar_entrada_control_publicidad(

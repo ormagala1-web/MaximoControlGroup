@@ -131,6 +131,7 @@ BOTS_OFICIALES_EXENTOS = {
     "maximocontrolgroup_bot",
     "unionmembresia_bot",
     "publicidadcontrolstreaming_bot",
+    "groupanonymousbot",
 }
 
 MAXIMO_APP_REF = None
@@ -894,10 +895,13 @@ def username_usuario(user):
 
 
 def es_bot_oficial_exento(user):
-    return bool(
-        getattr(user, "is_bot", False)
-        and username_usuario(user) in BOTS_OFICIALES_EXENTOS
-    )
+    if user is None or not getattr(user, "is_bot", False):
+        return False
+
+    if int(getattr(user, "id", 0) or 0) == GROUP_ANONYMOUS_BOT_ID:
+        return True
+
+    return username_usuario(user) in BOTS_OFICIALES_EXENTOS
 
 
 def nombre_visible_usuario(user):
@@ -3565,12 +3569,16 @@ async def maximo_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not mensaje:
         return
 
+    hora_peru = datetime.now(ZONA_PERU).strftime("%d/%m/%Y %H:%M:%S")
     await mensaje.reply_text(
         "✅ MaximoControlGroup operativo\n"
         "🔐 Membresía: 7/7 activa\n"
         "🌐 Moderación: 7 grupos oficiales + @Orma_Pruebas\n"
-        "🌐 Regla 7/7: usuarios, administradores y bots externos\n"        "✅ Bots oficiales: excluidos de raíz\n"        "🚫 Castigos/baneos: desactivados\n"
-        "🛡️ Control publicitario general: pendiente"
+        "🌐 Regla 7/7: usuarios, administradores y bots externos\n"
+        "✅ Bots oficiales y administrativos: excluidos de raíz\n"
+        "🚫 Castigos/baneos: desactivados\n"
+        "🛡️ Control publicitario general: pendiente\n"
+        f"🇵🇪 Hora Perú: {hora_peru}"
     )
 
 

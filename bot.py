@@ -98,6 +98,7 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 UNION_BOT_TOKEN = os.environ["UNION_BOT_TOKEN"]
 ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", "0") or 0)
 GROUP_ANONYMOUS_BOT_ID = 1087968824
+ORMA_ADMIN_USER_ID = int(os.environ.get("ORMA_ADMIN_USER_ID", "7615865943") or 0)
 
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
@@ -2545,32 +2546,42 @@ async def construir_texto_ficha_orma(captura):
 
 async def mostrar_ficha_orma_privada(bot, propietario_id, captura_id):
     captura = obtener_captura_orma(captura_id)
-    if not captura or captura["propietario_id"] != propietario_id:
+    if not captura or int(captura["propietario_id"]) != int(propietario_id):
         return False
 
     texto = await construir_texto_ficha_orma(captura)
+    teclado = teclado_ficha_orma(captura_id)
     panel_id = PANELES_ORMA.get(propietario_id) or obtener_panel_orma_db(propietario_id)
 
     if panel_id:
         try:
-            await safe_edit_message_text(bot,
+            editado = await bot.edit_message_text(
                 chat_id=propietario_id,
                 message_id=panel_id,
                 text=texto,
                 parse_mode="HTML",
-                reply_markup=teclado_ficha_orma(captura_id),
+                reply_markup=teclado,
             )
+            PANELES_ORMA[propietario_id] = editado.message_id
+            guardar_panel_orma_db(propietario_id, editado.message_id)
             return True
         except TelegramError as error:
             if "message is not modified" in str(error).lower():
+                PANELES_ORMA[propietario_id] = panel_id
                 return True
+            logging.info(
+                "Panel /orma previo no reutilizable propietario=%s message_id=%s: %s",
+                propietario_id,
+                panel_id,
+                error,
+            )
 
     try:
         enviado = await bot.send_message(
             chat_id=propietario_id,
             text=texto,
             parse_mode="HTML",
-            reply_markup=teclado_ficha_orma(captura_id),
+            reply_markup=teclado,
         )
         PANELES_ORMA[propietario_id] = enviado.message_id
         guardar_panel_orma_db(propietario_id, enviado.message_id)
@@ -2623,12 +2634,12 @@ async def orma_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     propietario_id = ejecutor.id
     if ejecutor.id == GROUP_ANONYMOUS_BOT_ID:
-        if ADMIN_USER_ID <= 0:
+        propietario_id = ORMA_ADMIN_USER_ID or ADMIN_USER_ID
+        if propietario_id <= 0:
             logging.error(
-                "No se puede resolver /orma anónimo: ADMIN_USER_ID no está configurado."
+                "No se puede resolver /orma anónimo: no existe un ID administrativo configurado."
             )
             return
-        propietario_id = ADMIN_USER_ID
 
     captura_id = guardar_captura_orma(
         propietario_id, tipo, objetivo_id, objetivo_username,

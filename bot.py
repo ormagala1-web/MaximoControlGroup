@@ -130,6 +130,7 @@ BOTS_OFICIALES_EXENTOS = {
     "mundostreamingperu_bot",
     "maximocontrolgroup_bot",
     "unionmembresia_bot",
+    "publicidadcontrolstreaming_bot",
 }
 
 MAXIMO_APP_REF = None

@@ -97,6 +97,7 @@ async def safe_query_edit_message(
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 UNION_BOT_TOKEN = os.environ["UNION_BOT_TOKEN"]
 ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", "0") or 0)
+GROUP_ANONYMOUS_BOT_ID = 1087968824
 
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
@@ -2615,12 +2616,21 @@ async def orma_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         return
 
+    propietario_id = ejecutor.id
+    if ejecutor.id == GROUP_ANONYMOUS_BOT_ID:
+        if ADMIN_USER_ID <= 0:
+            logging.error(
+                "No se puede resolver /orma anónimo: ADMIN_USER_ID no está configurado."
+            )
+            return
+        propietario_id = ADMIN_USER_ID
+
     captura_id = guardar_captura_orma(
-        ejecutor.id, tipo, objetivo_id, objetivo_username,
+        propietario_id, tipo, objetivo_id, objetivo_username,
         objetivo_nombre, objetivo_es_bot, chat, origen.message_id,
     )
-    CAPTURAS_ORMA[ejecutor.id] = captura_id
-    await mostrar_ficha_orma_privada(context.bot, ejecutor.id, captura_id)
+    CAPTURAS_ORMA[propietario_id] = captura_id
+    await mostrar_ficha_orma_privada(context.bot, propietario_id, captura_id)
 
 
 async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

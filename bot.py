@@ -37,7 +37,7 @@ async def safe_edit_message_text(
     **kwargs,
 ):
     try:
-        return await safe_edit_message_text(bot,
+        return await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=text,
@@ -71,7 +71,7 @@ async def safe_query_edit_message(
     **kwargs,
 ):
     try:
-        return await safe_query_edit_message(query,
+        return await query.edit_message_text(
             text=text,
             parse_mode=parse_mode,
             reply_markup=reply_markup,

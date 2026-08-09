@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.constants import ChatType
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -155,6 +155,11 @@ CAPTURAS_ORMA = {}
 # Clave: propietario_id -> {"captura_id": int, "campo": str}
 ENTRADAS_CONTROL_PUBLICIDAD = {}
 
+# Estados efímeros exclusivos de /orma CONTROL MÁXIMO.
+# No alteran las reglas raíz de los 7 grupos.
+SELECCIONES_MODERACION_ORMA = {}
+ENTRADAS_ORMA_TOTAL = {}
+
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
@@ -257,6 +262,64 @@ def inicializar_base_datos():
                 controlar_custom_emoji INTEGER NOT NULL DEFAULT 1,
                 fecha_actualizacion TEXT NOT NULL,
                 PRIMARY KEY (identidad_tipo, identidad_id)
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS control_publicidad_grupos (
+                identidad_tipo TEXT NOT NULL,
+                identidad_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                chat_username TEXT,
+                chat_nombre TEXT,
+                modo TEXT NOT NULL DEFAULT 'HEREDADO',
+                separacion_segundos INTEGER,
+                limite_hora INTEGER,
+                limite_dia INTEGER,
+                limite_semana INTEGER,
+                limite_mes INTEGER,
+                limite_anio INTEGER,
+                controlar_foto INTEGER NOT NULL DEFAULT 1,
+                controlar_video INTEGER NOT NULL DEFAULT 1,
+                controlar_gif INTEGER NOT NULL DEFAULT 1,
+                controlar_documento INTEGER NOT NULL DEFAULT 1,
+                controlar_enlace INTEGER NOT NULL DEFAULT 1,
+                controlar_custom_emoji INTEGER NOT NULL DEFAULT 1,
+                fecha_actualizacion TEXT NOT NULL,
+                PRIMARY KEY (identidad_tipo, identidad_id, chat_id)
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auditoria_orma_acciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                propietario_id INTEGER NOT NULL,
+                captura_id INTEGER,
+                objetivo_tipo TEXT NOT NULL,
+                objetivo_id INTEGER NOT NULL,
+                accion TEXT NOT NULL,
+                chat_id INTEGER,
+                chat_username TEXT,
+                chat_nombre TEXT,
+                detalle TEXT,
+                resultado TEXT NOT NULL,
+                error TEXT,
+                fecha_evento TEXT NOT NULL
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_orma_auditoria_objetivo_fecha
+            ON auditoria_orma_acciones (
+                objetivo_tipo,
+                objetivo_id,
+                fecha_evento
             )
             """
         )
@@ -1584,33 +1647,55 @@ def texto_ritmo_publicitario(resumen):
     }
 
 
-def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
-    cfg = obtener_control_identidad_db(identidad_tipo, identidad_id)
+def evaluar_control_publicidad(
+    identidad_tipo,
+    identidad_id,
+    tipo_contenido,
+    chat=None,
+):
+    if chat is not None:
+        cfg, alcance = control_efectivo_para_chat(
+            identidad_tipo,
+            identidad_id,
+            chat,
+        )
+    else:
+        cfg = obtener_control_identidad_db(identidad_tipo, identidad_id)
+        alcance = "GLOBAL"
+
     modo = str(cfg["modo"] or "HEREDADO").upper()
 
     if modo == "EXCLUIDO":
-        return True, "EXCLUIDO DEL CONTROL", cfg, None
+        return True, f"{alcance} · EXCLUIDO DEL CONTROL", cfg, None
 
     if modo == "ILIMITADO":
-        return True, "PUBLICIDAD ILIMITADA", cfg, None
+        return True, f"{alcance} · PUBLICIDAD ILIMITADA", cfg, None
 
     if modo == "BLOQUEADO":
-        return False, "PUBLICIDAD BLOQUEADA", cfg, None
+        return False, f"{alcance} · PUBLICIDAD BLOQUEADA", cfg, None
 
     if not tipo_habilitado_por_config(tipo_contenido, cfg):
-        return True, f"TIPO {tipo_contenido} EXCLUIDO", cfg, None
+        return True, f"{alcance} · TIPO {tipo_contenido} EXCLUIDO", cfg, None
 
-    # HEREDADO queda preparado para el próximo bloque global.
-    # Mientras no exista regla global, no impone límites individuales.
     if modo == "HEREDADO":
         return True, "HEREDADO · SIN REGLA GLOBAL ACTIVA TODAVÍA", cfg, None
 
-    # PERSONALIZADO
     ahora = datetime.now(timezone.utc)
 
     separacion = cfg["separacion_segundos"]
     if separacion is not None and int(separacion) > 0:
-        ultima = ultima_publicidad_permitida_db(identidad_tipo, identidad_id)
+        if alcance == "GRUPO" and chat is not None:
+            ultima = ultima_publicidad_permitida_grupo_db(
+                identidad_tipo,
+                identidad_id,
+                chat.id,
+            )
+        else:
+            ultima = ultima_publicidad_permitida_db(
+                identidad_tipo,
+                identidad_id,
+            )
+
         if ultima:
             try:
                 fecha_ultima = datetime.fromisoformat(ultima)
@@ -1620,7 +1705,7 @@ def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
                 if ahora < disponible:
                     return (
                         False,
-                        "SEPARACIÓN MÍNIMA NO CUMPLIDA",
+                        f"{alcance} · SEPARACIÓN MÍNIMA NO CUMPLIDA",
                         cfg,
                         disponible,
                     )
@@ -1641,17 +1726,24 @@ def evaluar_control_publicidad(identidad_tipo, identidad_id, tipo_contenido):
         if limite is None:
             continue
 
-        usados = contar_publicidad_permitida_db(
-            identidad_tipo,
-            identidad_id,
-            limites[periodo],
-        )
+        if alcance == "GRUPO" and chat is not None:
+            usados = contar_publicidad_permitida_grupo_db(
+                identidad_tipo,
+                identidad_id,
+                chat.id,
+                limites[periodo],
+            )
+        else:
+            usados = contar_publicidad_permitida_db(
+                identidad_tipo,
+                identidad_id,
+                limites[periodo],
+            )
 
         if usados >= int(limite):
-            return False, etiqueta, cfg, None
+            return False, f"{alcance} · {etiqueta}", cfg, None
 
-    return True, "DENTRO DE LOS LÍMITES", cfg, None
-
+    return True, f"{alcance} · DENTRO DE LOS LÍMITES", cfg, None
 
 def texto_valor_limite(valor):
     return "SIN LÍMITE" if valor is None else str(valor)
@@ -1744,7 +1836,13 @@ def teclado_control_publicidad(captura_id, cfg):
         ],
         [
             InlineKeyboardButton(
-                "♻️ RESTAURAR HEREDADO",
+                "🎯 CONTROL INDIVIDUAL POR GRUPO",
+                callback_data=f"orma_pg_lista:{captura_id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "♻️ RESTAURAR HEREDADO GLOBAL",
                 callback_data=f"orma_pub_reset:{captura_id}",
             )
         ],
@@ -1780,12 +1878,15 @@ async def texto_control_publicidad(captura):
         captura["objetivo_tipo"],
         captura["objetivo_id"],
     )
-    ritmo_txt = texto_ritmo_publicitario(ritmo)
     activos, libres = resumen_tipos_controlados(cfg)
     disponible = proxima_disponibilidad_separacion(
         captura["objetivo_tipo"],
         captura["objetivo_id"],
         cfg,
+    )
+    por_grupos = resumen_por_grupos_orma(
+        captura["objetivo_tipo"],
+        captura["objetivo_id"],
     )
 
     modo = str(cfg["modo"] or "HEREDADO").upper()
@@ -1806,45 +1907,59 @@ async def texto_control_publicidad(captura):
         else "Disponible ahora / no aplica"
     )
 
-    return (
-        "📣 <b>CONTROL PUBLICITARIO INDIVIDUAL</b>\n\n"
-        f"👤 <b>{captura['objetivo_nombre'] or 'Sin nombre'}</b>\n"
-        f"🆔 <code>{captura['objetivo_id']}</code>\n"
-        f"🏷️ Tipo: <b>{captura['objetivo_tipo']}</b>\n\n"
+    lineas = [
+        "📣 <b>PUBLICIDAD POR GRUPO · /ORMA</b>",
+        "",
+        f"👤 <b>{html.escape(str(captura['objetivo_nombre'] or 'Sin nombre'))}</b>",
+        f"🆔 <code>{captura['objetivo_id']}</code>",
+        "",
+    ]
 
-        "⚙️ <b>ESTADO DEL CONTROL</b>\n"
-        f"• Modo: <b>{modo}</b>\n"
-        f"• Efecto: <b>{efecto}</b>\n"
-        f"• Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>\n"
-        f"• Próxima por separación: <b>{proxima}</b>\n\n"
+    for grupo in por_grupos:
+        frecuencia = (
+            "Sin muestra"
+            if grupo["pub_promedio_intervalo"] is None
+            else f"1 cada {formatear_intervalo_segundos(grupo['pub_promedio_intervalo'])}"
+        )
+        lineas.extend([
+            f"<b>{grupo['indice']}. {nombre_grupo_orma(grupo)}</b>",
+            (
+                f"• H {grupo['pub_hora']} · 24h {grupo['pub_24h']} · "
+                f"D {grupo['pub_dia']} · S {grupo['pub_semana']} · "
+                f"M {grupo['pub_mes']} · T <b>{grupo['pub_total']}</b>"
+            ),
+            (
+                f"• ✅ {grupo['pub_permitidas']} · "
+                f"⛔ {grupo['pub_bloqueadas']} · "
+                f"Ritmo: <b>{frecuencia}</b>"
+            ),
+            f"• Última: <b>{formatear_fecha_peru(grupo['ultima_publicidad'])}</b>",
+            "",
+        ])
 
-        "🔢 <b>LÍMITES PERSONALIZADOS</b>\n"
-        f"• Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b> "
-        f"· usados {uso['hora']}\n"
-        f"• Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b> "
-        f"· usados {uso['dia']}\n"
-        f"• Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b> "
-        f"· usados {uso['semana']}\n"
-        f"• Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b> "
-        f"· usados {uso['mes']}\n"
-        f"• Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b> "
-        f"· usados {uso['anio']}\n\n"
+    lineas.extend([
+        "⚙️ <b>CONTROL INDIVIDUAL</b>",
+        f"• Modo: <b>{modo}</b>",
+        f"• Efecto: <b>{efecto}</b>",
+        f"• Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>",
+        f"• Próxima por separación: <b>{proxima}</b>",
+        "",
+        "🔢 <b>LÍMITES / USO GLOBAL DE LA IDENTIDAD</b>",
+        f"• Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b> · usados {uso['hora']}",
+        f"• Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b> · usados {uso['dia']}",
+        f"• Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b> · usados {uso['semana']}",
+        f"• Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b> · usados {uso['mes']}",
+        f"• Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b> · usados {uso['anio']}",
+        "",
+        "🎛 <b>TIPOS</b>",
+        f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>",
+        f"• Libres: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>",
+        "• Texto normal puro: <b>SIEMPRE LIBRE</b>",
+        "",
+        "Selecciona qué deseas modificar.",
+    ])
 
-        "🎛 <b>TIPOS</b>\n"
-        f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>\n"
-        f"• Libres por excepción: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>\n"
-        "• Texto normal puro: <b>SIEMPRE LIBRE</b>\n\n"
-
-        "📊 <b>COMPORTAMIENTO OBSERVADO</b>\n"
-        f"• Publicidad última hora: <b>{ritmo['ultima_hora']}</b>\n"
-        f"• Últimas 24 h: <b>{ritmo['ultimas_24h']}</b>\n"
-        f"• Frecuencia: <b>{ritmo_txt['frecuencia']}</b>\n"
-        f"• Última publicidad: "
-        f"<b>{formatear_fecha_peru(ritmo['ultima_publicidad'])}</b>\n\n"
-
-        "Selecciona qué deseas modificar."
-    )
-
+    return "\n".join(lineas)
 
 async def eliminar_aviso_publicidad_programado(
     bot,
@@ -2194,7 +2309,10 @@ def resumen_movimientos_db(user_id):
             SELECT
                 COALESCE(chat_nombre, chat_username, CAST(chat_id AS TEXT)) AS grupo,
                 SUM(CASE WHEN tipo_movimiento = 'ENTRADA' THEN 1 ELSE 0 END) AS entradas,
-                SUM(CASE WHEN tipo_movimiento = 'SALIDA' THEN 1 ELSE 0 END) AS salidas
+                SUM(CASE WHEN tipo_movimiento = 'SALIDA' THEN 1 ELSE 0 END) AS salidas,
+                MIN(CASE WHEN tipo_movimiento = 'ENTRADA' THEN fecha_evento END) AS primera_entrada,
+                MAX(CASE WHEN tipo_movimiento = 'ENTRADA' THEN fecha_evento END) AS ultima_entrada,
+                MAX(CASE WHEN tipo_movimiento = 'SALIDA' THEN fecha_evento END) AS ultima_salida
             FROM movimientos_grupo
             WHERE user_id = ?
             GROUP BY chat_id
@@ -2255,6 +2373,790 @@ def eliminar_panel_orma_db(propietario_id):
     with conectar_db() as conexion:
         conexion.execute("DELETE FROM paneles_orma WHERE propietario_id = ?", (propietario_id,))
         conexion.commit()
+
+
+
+def resumen_por_grupos_orma(objetivo_tipo, objetivo_id):
+    """
+    Panorama de los 7 grupos oficiales para /orma.
+
+    Está diseñado para ser rápido: usa consultas agrupadas sobre la base local
+    y NO hace llamadas adicionales a Telegram. La membresía en tiempo real se
+    resuelve una sola vez en construir_texto_ficha_orma().
+    """
+    grupos = obtener_grupos_obligatorios_db()
+    limites = limites_periodos_actividad()
+    ahora = datetime.now(timezone.utc)
+    desde_24h = (ahora - timedelta(hours=24)).isoformat()
+
+    with conectar_db() as conexion:
+        actividad = conexion.execute(
+            """
+            SELECT
+                LOWER(COALESCE(chat_username, '')) AS clave,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS hora,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS dia,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS semana,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS mes,
+                COUNT(*) AS total,
+                MAX(fecha_evento) AS ultima
+            FROM actividad_grupo
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            GROUP BY LOWER(COALESCE(chat_username, ''))
+            """,
+            (
+                limites["hora"],
+                limites["dia"],
+                limites["semana"],
+                limites["mes"],
+                objetivo_tipo,
+                objetivo_id,
+            ),
+        ).fetchall()
+
+        publicidad = conexion.execute(
+            """
+            SELECT
+                LOWER(COALESCE(chat_username, '')) AS clave,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS hora,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS h24,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS dia,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS semana,
+                SUM(CASE WHEN fecha_evento >= ? THEN 1 ELSE 0 END) AS mes,
+                COUNT(*) AS total,
+                SUM(CASE WHEN decision = 'PERMITIDA' THEN 1 ELSE 0 END) AS permitidas,
+                SUM(CASE WHEN decision <> 'PERMITIDA' THEN 1 ELSE 0 END) AS bloqueadas,
+                MAX(fecha_evento) AS ultima
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            GROUP BY LOWER(COALESCE(chat_username, ''))
+            """,
+            (
+                limites["hora"],
+                desde_24h,
+                limites["dia"],
+                limites["semana"],
+                limites["mes"],
+                objetivo_tipo,
+                objetivo_id,
+            ),
+        ).fetchall()
+
+        movimientos = []
+        if objetivo_tipo in {"USUARIO", "BOT"}:
+            movimientos = conexion.execute(
+                """
+                SELECT
+                    LOWER(COALESCE(chat_username, '')) AS clave,
+                    SUM(CASE WHEN tipo_movimiento = 'ENTRADA' THEN 1 ELSE 0 END) AS entradas,
+                    SUM(CASE WHEN tipo_movimiento = 'SALIDA' THEN 1 ELSE 0 END) AS salidas,
+                    MIN(CASE WHEN tipo_movimiento = 'ENTRADA' THEN fecha_evento END) AS primera_entrada,
+                    MAX(CASE WHEN tipo_movimiento = 'ENTRADA' THEN fecha_evento END) AS ultima_entrada,
+                    MAX(CASE WHEN tipo_movimiento = 'SALIDA' THEN fecha_evento END) AS ultima_salida
+                FROM movimientos_grupo
+                WHERE user_id = ?
+                GROUP BY LOWER(COALESCE(chat_username, ''))
+                """,
+                (objetivo_id,),
+            ).fetchall()
+
+        # Una sola lectura de eventos recientes para calcular ritmo por grupo.
+        eventos_ritmo = conexion.execute(
+            """
+            SELECT
+                LOWER(COALESCE(chat_username, '')) AS clave,
+                fecha_evento
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            ORDER BY fecha_evento DESC
+            LIMIT 300
+            """,
+            (objetivo_tipo, objetivo_id),
+        ).fetchall()
+
+    act = {str(f["clave"] or "").lower(): f for f in actividad}
+    pub = {str(f["clave"] or "").lower(): f for f in publicidad}
+    mov = {str(f["clave"] or "").lower(): f for f in movimientos}
+
+    fechas_por_grupo = {}
+    for fila in eventos_ritmo:
+        clave = str(fila["clave"] or "").lower()
+        if not clave:
+            continue
+        lista = fechas_por_grupo.setdefault(clave, [])
+        if len(lista) >= 20:
+            continue
+        try:
+            fecha = datetime.fromisoformat(str(fila["fecha_evento"]))
+            if fecha.tzinfo is None:
+                fecha = fecha.replace(tzinfo=timezone.utc)
+            lista.append(fecha.astimezone(timezone.utc))
+        except (TypeError, ValueError):
+            continue
+
+    resultado = []
+    for indice, grupo in enumerate(grupos, start=1):
+        clave = str(grupo["username"] or "").lower()
+        a = act.get(clave)
+        p = pub.get(clave)
+        m = mov.get(clave)
+
+        recientes = list(reversed(fechas_por_grupo.get(clave, [])))
+        intervalos = [
+            (actual - anterior).total_seconds()
+            for anterior, actual in zip(recientes, recientes[1:])
+            if (actual - anterior).total_seconds() >= 0
+        ]
+        promedio_intervalo = (
+            sum(intervalos) / len(intervalos)
+            if intervalos
+            else None
+        )
+
+        resultado.append({
+            "indice": indice,
+            "username": grupo["username"],
+            "nombre": grupo["nombre"] or grupo["username"],
+            "actividad_hora": int(a["hora"] or 0) if a else 0,
+            "actividad_dia": int(a["dia"] or 0) if a else 0,
+            "actividad_semana": int(a["semana"] or 0) if a else 0,
+            "actividad_mes": int(a["mes"] or 0) if a else 0,
+            "actividad_total": int(a["total"] or 0) if a else 0,
+            "ultima_actividad": a["ultima"] if a else None,
+            "pub_hora": int(p["hora"] or 0) if p else 0,
+            "pub_24h": int(p["h24"] or 0) if p else 0,
+            "pub_dia": int(p["dia"] or 0) if p else 0,
+            "pub_semana": int(p["semana"] or 0) if p else 0,
+            "pub_mes": int(p["mes"] or 0) if p else 0,
+            "pub_total": int(p["total"] or 0) if p else 0,
+            "pub_permitidas": int(p["permitidas"] or 0) if p else 0,
+            "pub_bloqueadas": int(p["bloqueadas"] or 0) if p else 0,
+            "ultima_publicidad": p["ultima"] if p else None,
+            "pub_promedio_intervalo": promedio_intervalo,
+            "entradas": int(m["entradas"] or 0) if m else 0,
+            "salidas": int(m["salidas"] or 0) if m else 0,
+            "primera_entrada": m["primera_entrada"] if m else None,
+            "ultima_entrada": m["ultima_entrada"] if m else None,
+            "ultima_salida": m["ultima_salida"] if m else None,
+        })
+
+    return resultado
+
+
+def estado_membresia_por_username(estado):
+    resultado = {}
+    if not estado:
+        return resultado
+
+    for grupo in estado.get("completados", []):
+        resultado[str(grupo["username"] or "").lower()] = "✅"
+
+    errores = {
+        str(grupo["username"] or "").lower()
+        for grupo, _ in estado.get("errores", [])
+    }
+
+    for grupo in estado.get("faltantes", []):
+        clave = str(grupo["username"] or "").lower()
+        resultado[clave] = "⚠️" if clave in errores else "❌"
+
+    return resultado
+
+
+def nombre_grupo_orma(grupo):
+    nombre = str(grupo.get("nombre") or grupo.get("username") or "Grupo")
+    return html.escape(nombre)
+
+
+
+def grupo_orma_por_indice(indice):
+    try:
+        indice = int(indice)
+    except (TypeError, ValueError):
+        return None
+    for orden, nombre, username, helpdesk in GRUPOS_OFICIALES:
+        if int(orden) == indice:
+            return {
+                "indice": int(orden),
+                "nombre": nombre,
+                "username": username,
+                "helpdesk": helpdesk,
+                "chat_ref": f"@{username}",
+            }
+    return None
+
+
+def indice_grupo_orma_por_username(username):
+    clave = str(username or "").lstrip("@").lower()
+    for orden, _, grupo_username, _ in GRUPOS_OFICIALES:
+        if grupo_username.lower() == clave:
+            return int(orden)
+    return None
+
+
+def cabecera_identidad_orma(captura, *, rol=None, habilitado=None):
+    username = (
+        f"@{captura['objetivo_username']}"
+        if captura["objetivo_username"]
+        else "Sin @username"
+    )
+    nombre = captura["objetivo_nombre"] or "Sin nombre visible"
+    tipo = str(captura["objetivo_tipo"] or "DESCONOCIDO").upper()
+    es_bot = "SÍ" if bool(captura["objetivo_es_bot"]) else "NO"
+
+    if rol is None:
+        rol = "Consultar ficha"
+    rol_txt = str(rol)
+    administrador = (
+        "SÍ"
+        if rol_txt.lower() in {"administrador", "propietario"}
+        else "NO"
+    )
+
+    if habilitado is None:
+        habilitado_txt = "Verificando / no aplica"
+    else:
+        habilitado_txt = "SÍ" if bool(habilitado) else "NO"
+
+    return "\n".join([
+        "👤 <b>IDENTIDAD CONTROLADA</b>",
+        f"• ID: <code>{captura['objetivo_id']}</code>",
+        f"• Usuario: <b>{html.escape(str(nombre))}</b>",
+        f"• UserName: <b>{html.escape(str(username))}</b>",
+        f"• Tipo: <b>{html.escape(tipo)}</b>",
+        f"• Bot: <b>{es_bot}</b>",
+        f"• Rol origen: <b>{html.escape(rol_txt)}</b>",
+        f"• Administrador: <b>{administrador}</b>",
+        f"• Habilitado 7/7: <b>{habilitado_txt}</b>",
+    ])
+
+
+async def estado_7grupos_orma_concurrente(objetivo_id):
+    """
+    Consulta los 7 grupos EN PARALELO para que /orma siga siendo rápido.
+    No reemplaza ni modifica la regla raíz 7/7.
+    """
+    if MAXIMO_APP_REF is None:
+        return []
+
+    async def consultar(grupo):
+        try:
+            miembro = await MAXIMO_APP_REF.bot.get_chat_member(
+                chat_id=grupo["chat_ref"],
+                user_id=int(objetivo_id),
+            )
+            rol = etiqueta_rol_chat_member(miembro)
+            return {
+                **grupo,
+                "miembro": bool(estado_es_miembro(miembro)),
+                "rol": rol,
+                "error": None,
+            }
+        except TelegramError as error:
+            return {
+                **grupo,
+                "miembro": False,
+                "rol": "No disponible",
+                "error": str(error),
+            }
+
+    grupos = [
+        grupo_orma_por_indice(indice)
+        for indice in range(1, TOTAL_GRUPOS_OBLIGATORIOS + 1)
+    ]
+    return await asyncio.gather(*(consultar(g) for g in grupos if g))
+
+
+def registrar_auditoria_orma(
+    propietario_id,
+    captura,
+    accion,
+    *,
+    grupo=None,
+    detalle=None,
+    resultado="OK",
+    error=None,
+):
+    ahora = datetime.now(timezone.utc).isoformat()
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            INSERT INTO auditoria_orma_acciones (
+                propietario_id,
+                captura_id,
+                objetivo_tipo,
+                objetivo_id,
+                accion,
+                chat_id,
+                chat_username,
+                chat_nombre,
+                detalle,
+                resultado,
+                error,
+                fecha_evento
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(propietario_id),
+                int(captura["id"]),
+                captura["objetivo_tipo"],
+                int(captura["objetivo_id"]),
+                str(accion),
+                None if not grupo else grupo.get("chat_id"),
+                None if not grupo else grupo.get("username"),
+                None if not grupo else grupo.get("nombre"),
+                detalle,
+                str(resultado),
+                error,
+                ahora,
+            ),
+        )
+        conexion.commit()
+
+
+def obtener_auditoria_orma_reciente(objetivo_tipo, objetivo_id, limite=15):
+    with conectar_db() as conexion:
+        return conexion.execute(
+            """
+            SELECT *
+            FROM auditoria_orma_acciones
+            WHERE objetivo_tipo = ?
+              AND objetivo_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (objetivo_tipo, int(objetivo_id), int(limite)),
+        ).fetchall()
+
+
+def obtener_control_grupo_db(
+    identidad_tipo,
+    identidad_id,
+    chat_id,
+    *,
+    chat_username=None,
+    chat_nombre=None,
+    crear=True,
+):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT *
+            FROM control_publicidad_grupos
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND chat_id = ?
+            LIMIT 1
+            """,
+            (identidad_tipo, int(identidad_id), int(chat_id)),
+        ).fetchone()
+
+        if fila or not crear:
+            return fila
+
+        conexion.execute(
+            """
+            INSERT INTO control_publicidad_grupos (
+                identidad_tipo,
+                identidad_id,
+                chat_id,
+                chat_username,
+                chat_nombre,
+                modo,
+                fecha_actualizacion
+            )
+            VALUES (?, ?, ?, ?, ?, 'HEREDADO', ?)
+            """,
+            (
+                identidad_tipo,
+                int(identidad_id),
+                int(chat_id),
+                chat_username,
+                chat_nombre,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conexion.commit()
+
+        return conexion.execute(
+            """
+            SELECT *
+            FROM control_publicidad_grupos
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND chat_id = ?
+            """,
+            (identidad_tipo, int(identidad_id), int(chat_id)),
+        ).fetchone()
+
+
+def actualizar_control_grupo_db(
+    identidad_tipo,
+    identidad_id,
+    chat_id,
+    *,
+    chat_username=None,
+    chat_nombre=None,
+    **campos,
+):
+    permitidos = {
+        "modo",
+        "separacion_segundos",
+        "limite_hora",
+        "limite_dia",
+        "limite_semana",
+        "limite_mes",
+        "limite_anio",
+        "controlar_foto",
+        "controlar_video",
+        "controlar_gif",
+        "controlar_documento",
+        "controlar_enlace",
+        "controlar_custom_emoji",
+    }
+
+    datos = {k: v for k, v in campos.items() if k in permitidos}
+    if not datos:
+        return False
+
+    obtener_control_grupo_db(
+        identidad_tipo,
+        identidad_id,
+        chat_id,
+        chat_username=chat_username,
+        chat_nombre=chat_nombre,
+        crear=True,
+    )
+
+    if chat_username is not None:
+        datos["chat_username"] = chat_username
+    if chat_nombre is not None:
+        datos["chat_nombre"] = chat_nombre
+    datos["fecha_actualizacion"] = datetime.now(timezone.utc).isoformat()
+
+    partes = [f"{k} = ?" for k in datos]
+    valores = list(datos.values())
+    valores.extend([identidad_tipo, int(identidad_id), int(chat_id)])
+
+    with conectar_db() as conexion:
+        cursor = conexion.execute(
+            f"""
+            UPDATE control_publicidad_grupos
+            SET {", ".join(partes)}
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND chat_id = ?
+            """,
+            valores,
+        )
+        conexion.commit()
+        return cursor.rowcount > 0
+
+
+def borrar_control_grupo_db(identidad_tipo, identidad_id, chat_id):
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            DELETE FROM control_publicidad_grupos
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND chat_id = ?
+            """,
+            (identidad_tipo, int(identidad_id), int(chat_id)),
+        )
+        conexion.commit()
+
+
+def copiar_global_a_grupo_db(
+    identidad_tipo,
+    identidad_id,
+    chat_id,
+    *,
+    chat_username=None,
+    chat_nombre=None,
+):
+    global_cfg = obtener_control_identidad_db(identidad_tipo, identidad_id)
+    campos = {
+        "modo": "PERSONALIZADO",
+        "separacion_segundos": global_cfg["separacion_segundos"],
+        "limite_hora": global_cfg["limite_hora"],
+        "limite_dia": global_cfg["limite_dia"],
+        "limite_semana": global_cfg["limite_semana"],
+        "limite_mes": global_cfg["limite_mes"],
+        "limite_anio": global_cfg["limite_anio"],
+        "controlar_foto": global_cfg["controlar_foto"],
+        "controlar_video": global_cfg["controlar_video"],
+        "controlar_gif": global_cfg["controlar_gif"],
+        "controlar_documento": global_cfg["controlar_documento"],
+        "controlar_enlace": global_cfg["controlar_enlace"],
+        "controlar_custom_emoji": global_cfg["controlar_custom_emoji"],
+    }
+    actualizar_control_grupo_db(
+        identidad_tipo,
+        identidad_id,
+        chat_id,
+        chat_username=chat_username,
+        chat_nombre=chat_nombre,
+        **campos,
+    )
+    return obtener_control_grupo_db(
+        identidad_tipo,
+        identidad_id,
+        chat_id,
+        crear=False,
+    )
+
+
+def control_efectivo_para_chat(identidad_tipo, identidad_id, chat):
+    cfg_grupo = obtener_control_grupo_db(
+        identidad_tipo,
+        identidad_id,
+        chat.id,
+        chat_username=getattr(chat, "username", None),
+        chat_nombre=getattr(chat, "title", None),
+        crear=False,
+    )
+    if cfg_grupo and str(cfg_grupo["modo"] or "HEREDADO").upper() != "HEREDADO":
+        return cfg_grupo, "GRUPO"
+    return obtener_control_identidad_db(identidad_tipo, identidad_id), "GLOBAL"
+
+
+def contar_publicidad_permitida_grupo_db(
+    identidad_tipo,
+    identidad_id,
+    chat_id,
+    desde,
+):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND chat_id = ?
+              AND decision = 'PERMITIDA'
+              AND fecha_evento >= ?
+            """,
+            (identidad_tipo, int(identidad_id), int(chat_id), desde),
+        ).fetchone()
+    return int(fila["total"] if fila else 0)
+
+
+def ultima_publicidad_permitida_grupo_db(
+    identidad_tipo,
+    identidad_id,
+    chat_id,
+):
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT fecha_evento
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND chat_id = ?
+              AND decision = 'PERMITIDA'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (identidad_tipo, int(identidad_id), int(chat_id)),
+        ).fetchone()
+    return fila["fecha_evento"] if fila else None
+
+
+def permisos_mute_total():
+    return ChatPermissions(
+        can_send_messages=False,
+        can_send_audios=False,
+        can_send_documents=False,
+        can_send_photos=False,
+        can_send_videos=False,
+        can_send_video_notes=False,
+        can_send_voice_notes=False,
+        can_send_polls=False,
+        can_send_other_messages=False,
+        can_add_web_page_previews=False,
+        can_change_info=False,
+        can_invite_users=False,
+        can_pin_messages=False,
+        can_manage_topics=False,
+    )
+
+
+async def permisos_normales_grupo(bot, chat_ref):
+    try:
+        chat = await bot.get_chat(chat_ref)
+        if getattr(chat, "permissions", None) is not None:
+            return chat.permissions
+    except TelegramError:
+        pass
+
+    return ChatPermissions(
+        can_send_messages=True,
+        can_send_audios=True,
+        can_send_documents=True,
+        can_send_photos=True,
+        can_send_videos=True,
+        can_send_video_notes=True,
+        can_send_voice_notes=True,
+        can_send_polls=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_change_info=False,
+        can_invite_users=True,
+        can_pin_messages=False,
+        can_manage_topics=False,
+    )
+
+
+async def ejecutar_moderacion_grupo_orma(
+    bot,
+    propietario_id,
+    captura,
+    accion,
+    grupo,
+    *,
+    duracion_segundos=None,
+):
+    objetivo_id = int(captura["objetivo_id"])
+    chat_ref = grupo["chat_ref"]
+
+    try:
+        chat = await bot.get_chat(chat_ref)
+        grupo_real = {
+            **grupo,
+            "chat_id": chat.id,
+            "nombre": chat.title or grupo["nombre"],
+            "username": chat.username or grupo["username"],
+        }
+
+        if accion == "MUTE":
+            until_date = None
+            if duracion_segundos is not None:
+                until_date = datetime.now(timezone.utc) + timedelta(
+                    seconds=int(duracion_segundos)
+                )
+            await bot.restrict_chat_member(
+                chat_id=chat.id,
+                user_id=objetivo_id,
+                permissions=permisos_mute_total(),
+                until_date=until_date,
+                use_independent_chat_permissions=True,
+            )
+            detalle = (
+                "PERMANENTE"
+                if duracion_segundos is None
+                else texto_separacion(int(duracion_segundos))
+            )
+
+        elif accion == "UNMUTE":
+            permisos = await permisos_normales_grupo(bot, chat.id)
+            await bot.restrict_chat_member(
+                chat_id=chat.id,
+                user_id=objetivo_id,
+                permissions=permisos,
+                use_independent_chat_permissions=True,
+            )
+            detalle = "PERMISOS RESTAURADOS"
+
+        elif accion == "BAN":
+            await bot.ban_chat_member(chat_id=chat.id, user_id=objetivo_id)
+            detalle = "BANEADO"
+
+        elif accion == "UNBAN":
+            await bot.unban_chat_member(
+                chat_id=chat.id,
+                user_id=objetivo_id,
+                only_if_banned=True,
+            )
+            detalle = "DESBANEADO"
+
+        elif accion == "EXPULSAR":
+            await bot.ban_chat_member(chat_id=chat.id, user_id=objetivo_id)
+            await bot.unban_chat_member(chat_id=chat.id, user_id=objetivo_id)
+            detalle = "EXPULSADO · PUEDE REINGRESAR"
+
+        else:
+            raise RuntimeError("Acción no reconocida.")
+
+        registrar_auditoria_orma(
+            propietario_id,
+            captura,
+            accion,
+            grupo=grupo_real,
+            detalle=detalle,
+            resultado="OK",
+        )
+        return True, grupo_real["nombre"], detalle
+
+    except Exception as error:
+        registrar_auditoria_orma(
+            propietario_id,
+            captura,
+            accion,
+            grupo=grupo,
+            detalle=None,
+            resultado="ERROR",
+            error=str(error),
+        )
+        return False, grupo["nombre"], str(error)
+
+
+async def ejecutar_moderacion_seleccion_orma(
+    bot,
+    propietario_id,
+    captura,
+    accion,
+    indices,
+    *,
+    duracion_segundos=None,
+):
+    resultados = []
+    # Secuencial para no bombardear la API y poder auditar cada grupo.
+    for indice in sorted({int(x) for x in indices}):
+        grupo = grupo_orma_por_indice(indice)
+        if not grupo:
+            continue
+        resultados.append(
+            await ejecutar_moderacion_grupo_orma(
+                bot,
+                propietario_id,
+                captura,
+                accion,
+                grupo,
+                duracion_segundos=duracion_segundos,
+            )
+        )
+        await asyncio.sleep(0.25)
+    return resultados
+
+
+def texto_resultados_moderacion(resultados):
+    lineas = []
+    correctos = 0
+    fallidos = 0
+    for ok, nombre, detalle in resultados:
+        if ok:
+            correctos += 1
+            lineas.append(
+                f"✅ <b>{html.escape(str(nombre))}</b> · {html.escape(str(detalle))}"
+            )
+        else:
+            fallidos += 1
+            lineas.append(
+                f"❌ <b>{html.escape(str(nombre))}</b> · {html.escape(str(detalle))}"
+            )
+    lineas.extend([
+        "",
+        f"Resultado: ✅ <b>{correctos}</b> · ❌ <b>{fallidos}</b>",
+        f"Hora Perú: <b>{formatear_fecha_peru(datetime.now(timezone.utc).isoformat())}</b>",
+    ])
+    return "\n".join(lineas)
 
 
 def obtener_resumen_identidad_orma(objetivo_tipo, objetivo_id):
@@ -2422,76 +3324,49 @@ def teclado_ficha_orma(captura_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 ACTUALIZAR FICHA", callback_data=f"orma_ficha:{captura_id}")],
         [
-            InlineKeyboardButton("🔐 MEMBRESÍA", callback_data=f"orma_membresia:{captura_id}"),
-            InlineKeyboardButton("📣 PUBLICIDAD", callback_data=f"orma_publicidad:{captura_id}"),
+            InlineKeyboardButton("🔐 MEMBRESÍA 7/7", callback_data=f"orma_membresia:{captura_id}"),
+            InlineKeyboardButton("📊 ACTIVIDAD 7/7", callback_data=f"orma_actividad:{captura_id}"),
         ],
         [
-            InlineKeyboardButton("📊 ACTIVIDAD", callback_data=f"orma_actividad:{captura_id}"),
+            InlineKeyboardButton("📣 PUBLICIDAD 7/7", callback_data=f"orma_publicidad:{captura_id}"),
             InlineKeyboardButton("🚪 ENTRADAS / SALIDAS", callback_data=f"orma_movimientos:{captura_id}"),
         ],
+        [InlineKeyboardButton("🛡️ CONTROL TOTAL · MODERACIÓN", callback_data=f"orma_mod:{captura_id}")],
+        [InlineKeyboardButton("📜 AUDITORÍA /ORMA", callback_data=f"orma_audit:{captura_id}")],
         [
             InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
             InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
         ],
     ])
 
-
 async def construir_texto_ficha_orma(captura):
     objetivo_id = captura["objetivo_id"]
-    username = (
-        f"@{captura['objetivo_username']}"
-        if captura["objetivo_username"]
-        else "Sin @username"
-    )
-    nombre = captura["objetivo_nombre"] or "Sin nombre visible"
-    rol = await obtener_rol_en_grupo(captura["chat_id"], objetivo_id)
+    rol_origen = await obtener_rol_en_grupo(captura["chat_id"], objetivo_id)
 
-    progreso = "No aplica"
-    faltantes = 0
-    total = TOTAL_GRUPOS_OBLIGATORIOS
-
+    estados = []
     if captura["objetivo_tipo"] in {"USUARIO", "BOT"}:
-        try:
-            estado = await obtener_estado_membresia_7de7(objetivo_id)
-            completos = len(estado["completados"])
-            total = estado["total"]
-            faltantes = len(estado["faltantes"])
-            progreso = f"{completos}/{total}"
-        except Exception:
-            logging.exception(
-                "Error obteniendo membresía para /orma objetivo=%s",
-                objetivo_id,
-            )
-            progreso = "No disponible"
+        estados = await estado_7grupos_orma_concurrente(objetivo_id)
 
-    oficial = (
-        captura["objetivo_tipo"] == "BOT"
-        and (captura["objetivo_username"] or "").lower()
-        in BOTS_OFICIALES_EXENTOS
+    habilitado = (
+        bool(estados)
+        and len(estados) == TOTAL_GRUPOS_OBLIGATORIOS
+        and all(item["miembro"] for item in estados)
+    ) if captura["objetivo_tipo"] in {"USUARIO", "BOT"} else None
+
+    por_grupos = resumen_por_grupos_orma(
+        captura["objetivo_tipo"],
+        objetivo_id,
     )
-
-    if oficial:
-        condicion = "✅ BOT OFICIAL · EXENTO DE RAÍZ"
-    elif progreso == f"{total}/{total}":
-        condicion = "🟢 HABILITADO"
-    elif progreso == "No aplica":
-        condicion = "⚪ IDENTIDAD DE CHAT/CANAL"
-    elif progreso == "No disponible":
-        condicion = "🟡 ESTADO NO DISPONIBLE"
-    else:
-        condicion = f"🔴 MEMBRESÍA INCOMPLETA · faltan {faltantes}"
+    estados_por_username = {
+        str(item["username"]).lower(): item
+        for item in estados
+    }
 
     resumen = obtener_resumen_identidad_orma(
         captura["objetivo_tipo"],
         objetivo_id,
     )
-
     capturas_totales = contar_capturas_objetivo_orma(
-        captura["objetivo_tipo"],
-        objetivo_id,
-    )
-
-    modo_publicidad = texto_modo_publicidad_ficha(
         captura["objetivo_tipo"],
         objetivo_id,
     )
@@ -2501,67 +3376,101 @@ async def construir_texto_ficha_orma(captura):
         or resumen["primera_actividad"]
         or captura["fecha_captura"]
     )
-
     ultima_observacion = (
         resumen["ultima_actividad"]
         or resumen["ultima_actualizacion_identidad"]
         or captura["fecha_captura"]
     )
 
-    return (
-        "🛡️ <b>FICHA AVANZADA /ORMA</b>\n\n"
+    lineas = [
+        "🦍 <b>MÁXIMO CONTROL TOTAL · FICHA AVANZADA</b>",
+        "",
+        cabecera_identidad_orma(
+            captura,
+            rol=rol_origen,
+            habilitado=habilitado,
+        ),
+        "",
+        "📍 <b>CONTROL INMEDIATO DE LOS 7 GRUPOS</b>",
+        "<i>M = membresía/rol · A = actividad · P = publicidad</i>",
+    ]
 
-        "👤 <b>IDENTIDAD</b>\n"
-        f"• Nombre: <b>{nombre}</b>\n"
-        f"• Usuario: <b>{username}</b>\n"
-        f"• ID: <code>{objetivo_id}</code>\n"
-        f"• Tipo: <b>{captura['objetivo_tipo']}</b>\n"
-        f"• Rol en grupo origen: <b>{rol}</b>\n\n"
+    for grupo in por_grupos:
+        clave = str(grupo["username"] or "").lower()
+        estado = estados_por_username.get(clave)
 
-        "🔐 <b>ESTADO GENERAL</b>\n"
-        f"• Membresía: <b>{progreso}</b>\n"
-        f"• Condición: <b>{condicion}</b>\n"
-        f"• Control publicidad: <b>{modo_publicidad}</b>\n\n"
+        if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
+            marca = "⚪"
+            rol = "No aplica"
+        elif estado is None:
+            marca = "❔"
+            rol = "No disponible"
+        elif estado["error"]:
+            marca = "⚠️"
+            rol = estado["rol"]
+        elif estado["miembro"]:
+            marca = "✅"
+            rol = estado["rol"]
+        else:
+            marca = "❌"
+            rol = estado["rol"]
 
-        "📊 <b>ACTIVIDAD OBSERVADA</b>\n"
-        f"• Última hora: <b>{resumen['actividad_hora']}</b>\n"
-        f"• Hoy: <b>{resumen['actividad_dia']}</b>\n"
-        f"• Semana: <b>{resumen['actividad_semana']}</b>\n"
-        f"• Mes: <b>{resumen['actividad_mes']}</b>\n"
-        f"• Total registrado: <b>{resumen['actividad_total']}</b>\n\n"
+        lineas.extend([
+            "",
+            f"<b>{grupo['indice']}. {marca} {nombre_grupo_orma(grupo)}</b>",
+            f"M: <b>{html.escape(str(rol))}</b>",
+            (
+                "A: "
+                f"H {grupo['actividad_hora']} · "
+                f"D {grupo['actividad_dia']} · "
+                f"S {grupo['actividad_semana']} · "
+                f"M {grupo['actividad_mes']} · "
+                f"T <b>{grupo['actividad_total']}</b>"
+            ),
+            (
+                "P: "
+                f"H {grupo['pub_hora']} · "
+                f"24h {grupo['pub_24h']} · "
+                f"T <b>{grupo['pub_total']}</b> "
+                f"(✅ {grupo['pub_permitidas']} · ⛔ {grupo['pub_bloqueadas']})"
+            ),
+        ])
 
-        "📣 <b>PUBLICIDAD REGISTRADA</b>\n"
-        f"• Total evaluada: <b>{resumen['publicidad_total']}</b>\n"
-        f"• Permitida: <b>{resumen['publicidad_permitida']}</b>\n"
-        f"• Rechazada/controlada: <b>{resumen['publicidad_bloqueada']}</b>\n"
-        f"• Última hora: <b>{resumen['ritmo_publicidad']['ultima_hora']}</b> "
-        f"(✅ {resumen['ritmo_publicidad']['permitidas_hora']} · "
-        f"⛔ {resumen['ritmo_publicidad']['rechazadas_hora']})\n"
-        f"• Últimas 24 h: <b>{resumen['ritmo_publicidad']['ultimas_24h']}</b>\n"
-        f"• Ritmo promedio: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['frecuencia']}</b>\n"
-        f"• Último intervalo: <b>{texto_ritmo_publicitario(resumen['ritmo_publicidad'])['ultimo_intervalo']}</b>\n"
-        f"• Última publicidad: <b>{formatear_fecha_peru(resumen['ritmo_publicidad']['ultima_publicidad'])}</b>\n\n"
+    lineas.extend([
+        "",
+        "📊 <b>TOTALES</b>",
+        (
+            f"• Actividad: H {resumen['actividad_hora']} · "
+            f"D {resumen['actividad_dia']} · "
+            f"S {resumen['actividad_semana']} · "
+            f"M {resumen['actividad_mes']} · "
+            f"T <b>{resumen['actividad_total']}</b>"
+        ),
+        (
+            f"• Publicidad: <b>{resumen['publicidad_total']}</b> "
+            f"(✅ {resumen['publicidad_permitida']} · "
+            f"⛔ {resumen['publicidad_bloqueada']})"
+        ),
+        f"• Entradas / salidas: <b>{resumen['entradas']} / {resumen['salidas']}</b>",
+        "",
+        "🕐 <b>SEGUIMIENTO · HORA PERÚ</b>",
+        f"• Primera observación: <b>{formatear_fecha_peru(primera_observacion)}</b>",
+        f"• Última actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>",
+        f"• Capturas /orma: <b>{capturas_totales}</b>",
+        "",
+        "📌 <b>CAPTURA ACTUAL</b>",
+        f"• Grupo: <b>{html.escape(str(captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']))}</b>",
+        f"• Mensaje: <code>{captura['mensaje_origen_id']}</code>",
+        f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>",
+    ])
 
-        "🚪 <b>MOVIMIENTOS OBSERVADOS</b>\n"
-        f"• Entradas: <b>{resumen['entradas']}</b>\n"
-        f"• Salidas: <b>{resumen['salidas']}</b>\n"
-        f"• Primera entrada: <b>{formatear_fecha_peru(resumen['primera_entrada'])}</b>\n"
-        f"• Última entrada: <b>{formatear_fecha_peru(resumen['ultima_entrada'])}</b>\n"
-        f"• Última salida: <b>{formatear_fecha_peru(resumen['ultima_salida'])}</b>\n\n"
-
-        "🕐 <b>SEGUIMIENTO</b>\n"
-        f"• Primera observación: <b>{formatear_fecha_peru(primera_observacion)}</b>\n"
-        f"• Última actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>\n"
-        f"• Capturas /orma: <b>{capturas_totales}</b>\n\n"
-
-        "📍 <b>ORIGEN DE ESTA CAPTURA</b>\n"
-        f"• Grupo: <b>{captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']}</b>\n"
-        f"• Mensaje: <code>{captura['mensaje_origen_id']}</code>\n"
-        f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>\n\n"
-
-        "Selecciona una herramienta."
-    )
-
+    texto = "\n".join(lineas)
+    if len(texto) > 4050:
+        texto = texto[:3970] + (
+            "\n\n<i>Ficha abreviada por límite de Telegram. "
+            "Los paneles inferiores conservan el detalle completo.</i>"
+        )
+    return texto
 
 async def mostrar_ficha_orma_privada(bot, propietario_id, captura_id):
     captura = obtener_captura_orma(captura_id)
@@ -2668,6 +3577,230 @@ async def orma_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await mostrar_ficha_orma_privada(context.bot, propietario_id, captura_id)
 
 
+
+async def resolver_chat_grupo_orma(bot, indice):
+    grupo = grupo_orma_por_indice(indice)
+    if not grupo:
+        return None
+    try:
+        chat = await bot.get_chat(grupo["chat_ref"])
+        return {
+            **grupo,
+            "chat_id": chat.id,
+            "nombre": chat.title or grupo["nombre"],
+            "username": chat.username or grupo["username"],
+        }
+    except TelegramError:
+        return {
+            **grupo,
+            "chat_id": None,
+        }
+
+
+async def teclado_lista_publicidad_grupos(captura, bot):
+    filas = []
+    for indice in range(1, 8):
+        grupo = await resolver_chat_grupo_orma(bot, indice)
+        if not grupo or grupo["chat_id"] is None:
+            etiqueta = f"{indice}. ⚠️ Grupo no disponible"
+        else:
+            cfg = obtener_control_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                crear=False,
+            )
+            modo = (
+                str(cfg["modo"] or "HEREDADO").upper()
+                if cfg
+                else "HEREDADO"
+            )
+            etiqueta = f"{indice}. {modo} · {grupo['nombre']}"
+        filas.append([
+            InlineKeyboardButton(
+                etiqueta[:60],
+                callback_data=f"orma_pg:{captura['id']}:{indice}",
+            )
+        ])
+
+    filas.extend([
+        [InlineKeyboardButton(
+            "🌐 CONTROL GLOBAL 7/7",
+            callback_data=f"orma_publicidad:{captura['id']}",
+        )],
+        [InlineKeyboardButton(
+            "⬅️ RETROCEDER",
+            callback_data=f"orma_ficha:{captura['id']}",
+        )],
+        [
+            InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+        ],
+    ])
+    return InlineKeyboardMarkup(filas)
+
+
+async def texto_control_publicidad_grupo(captura, grupo, cfg):
+    global_cfg = obtener_control_identidad_db(
+        captura["objetivo_tipo"],
+        captura["objetivo_id"],
+    )
+    heredado = str(cfg["modo"] or "HEREDADO").upper() == "HEREDADO"
+    efectivo = global_cfg if heredado else cfg
+
+    limites = limites_periodos_publicidad()
+    uso = {}
+    for periodo, inicio in limites.items():
+        uso[periodo] = contar_publicidad_permitida_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            inicio,
+        )
+
+    activos, libres = resumen_tipos_controlados(efectivo)
+    rol = await obtener_rol_en_grupo(grupo["chat_id"], captura["objetivo_id"])
+    habilitado = rol.lower() not in {
+        "fuera del grupo",
+        "expulsado",
+        "desconocido",
+        "no disponible",
+    }
+
+    return "\n".join([
+        "🎯 <b>CONTROL PUBLICITARIO · GRUPO INDIVIDUAL</b>",
+        "",
+        cabecera_identidad_orma(
+            captura,
+            rol=rol,
+            habilitado=habilitado,
+        ),
+        "",
+        f"📍 Grupo: <b>{html.escape(str(grupo['nombre']))}</b>",
+        f"• UserName grupo: <b>@{html.escape(str(grupo['username']).lstrip('@'))}</b>",
+        "",
+        f"⚙️ Modo propio: <b>{html.escape(str(cfg['modo']))}</b>",
+        (
+            "• Configuración efectiva: <b>GLOBAL HEREDADA</b>"
+            if heredado
+            else "• Configuración efectiva: <b>PROPIA DE ESTE GRUPO</b>"
+        ),
+        f"• Separación: <b>{texto_separacion(efectivo['separacion_segundos'])}</b>",
+        "",
+        "🔢 <b>LÍMITES / USO EN ESTE GRUPO</b>",
+        f"• Hora: {texto_valor_limite(efectivo['limite_hora'])} · usados <b>{uso['hora']}</b>",
+        f"• Día: {texto_valor_limite(efectivo['limite_dia'])} · usados <b>{uso['dia']}</b>",
+        f"• Semana: {texto_valor_limite(efectivo['limite_semana'])} · usados <b>{uso['semana']}</b>",
+        f"• Mes: {texto_valor_limite(efectivo['limite_mes'])} · usados <b>{uso['mes']}</b>",
+        f"• Año: {texto_valor_limite(efectivo['limite_anio'])} · usados <b>{uso['anio']}</b>",
+        "",
+        "🎛 <b>TIPOS</b>",
+        f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>",
+        f"• Libres: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>",
+        "• Texto normal puro: <b>SIEMPRE LIBRE</b>",
+        "",
+        f"🕐 Actualizado: <b>{formatear_fecha_peru(cfg['fecha_actualizacion'])}</b>",
+    ])
+
+
+def teclado_publicidad_grupo(captura_id, indice, cfg):
+    modo = str(cfg["modo"] or "HEREDADO").upper()
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"⚙️ MODO: {modo}",
+            callback_data=f"orma_pgm:{captura_id}:{indice}",
+        )],
+        [InlineKeyboardButton(
+            f"⏱ SEPARACIÓN: {texto_separacion(cfg['separacion_segundos'])}",
+            callback_data=f"orma_pgs:{captura_id}:{indice}",
+        )],
+        [
+            InlineKeyboardButton(
+                "🔢 LÍMITES",
+                callback_data=f"orma_pgl:{captura_id}:{indice}",
+            ),
+            InlineKeyboardButton(
+                "🎛 TIPOS",
+                callback_data=f"orma_pgt:{captura_id}:{indice}",
+            ),
+        ],
+        [InlineKeyboardButton(
+            "♻️ HEREDAR GLOBAL",
+            callback_data=f"orma_pgr:{captura_id}:{indice}",
+        )],
+        [InlineKeyboardButton(
+            "⬅️ LISTA DE GRUPOS",
+            callback_data=f"orma_pg_lista:{captura_id}",
+        )],
+        [
+            InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+        ],
+    ])
+
+
+def seleccion_moderacion_orma(propietario_id, captura_id, accion):
+    estado = SELECCIONES_MODERACION_ORMA.get(int(propietario_id))
+    if (
+        not estado
+        or int(estado.get("captura_id", -1)) != int(captura_id)
+        or estado.get("accion") != accion
+    ):
+        estado = {
+            "captura_id": int(captura_id),
+            "accion": accion,
+            "grupos": set(),
+            "duracion_segundos": None,
+        }
+        SELECCIONES_MODERACION_ORMA[int(propietario_id)] = estado
+    return estado
+
+
+def teclado_seleccion_moderacion(captura_id, accion, seleccionados):
+    filas = [
+        [
+            InlineKeyboardButton(
+                "✅ TODOS 7/7",
+                callback_data=f"orma_modall:{captura_id}:{accion}",
+            ),
+            InlineKeyboardButton(
+                "🚫 NINGUNO",
+                callback_data=f"orma_modnone:{captura_id}:{accion}",
+            ),
+        ]
+    ]
+    for indice in range(1, 8):
+        grupo = grupo_orma_por_indice(indice)
+        marca = "✅" if indice in seleccionados else "⬜"
+        filas.append([
+            InlineKeyboardButton(
+                f"{marca} {indice}. {grupo['nombre']}"[:60],
+                callback_data=f"orma_modtog:{captura_id}:{accion}:{indice}",
+            )
+        ])
+    filas.extend([
+        [InlineKeyboardButton(
+            "➡️ CONTINUAR",
+            callback_data=f"orma_modnext:{captura_id}:{accion}",
+        )],
+        [InlineKeyboardButton(
+            "⬅️ MODERACIÓN",
+            callback_data=f"orma_mod:{captura_id}",
+        )],
+    ])
+    return InlineKeyboardMarkup(filas)
+
+
+def texto_accion_moderacion(accion):
+    return {
+        "MUTE": "🔇 MUTEAR",
+        "UNMUTE": "🔊 DESMUTEAR",
+        "EXPULSAR": "👢 EXPULSAR",
+        "BAN": "🚫 BANEAR",
+        "UNBAN": "♻️ DESBANEAR",
+    }.get(accion, accion)
+
+
 async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     usuario = update.effective_user
@@ -2678,6 +3811,8 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "orma_cerrar":
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
+        ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+        SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
         await query.answer()
         try:
             await query.message.delete()
@@ -2689,10 +3824,12 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "orma_menu_principal":
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
+        ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+        SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
         await query.answer()
         try:
             await safe_query_edit_message(query,
-                "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
+                "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
                 "Centro privado de administración.\n\n"
                 "📌 Responde cualquier mensaje en un grupo controlado "
                 "con <code>/orma</code> para abrir su expediente.\n\n"
@@ -2737,16 +3874,26 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             estado = await obtener_estado_membresia_7de7(captura["objetivo_id"])
+            marcas = estado_membresia_por_username(estado)
             lineas = [
-                "🔐 <b>MEMBRESÍA 7/7</b>", "",
-                f"Progreso: <b>{len(estado['completados'])}/{estado['total']}</b>", "",
+                "🔐 <b>MEMBRESÍA 7/7 · DETALLE</b>",
+                "",
+                f"Progreso: <b>{len(estado['completados'])}/{estado['total']}</b>",
+                "",
             ]
-            if estado["completo"]:
-                lineas.append("✅ Pertenece a los 7 grupos oficiales.")
-            else:
-                lineas.append("❌ <b>Grupos faltantes:</b>")
-                for grupo in estado["faltantes"]:
-                    lineas.append(f"• {grupo['nombre']}")
+            for indice, grupo in enumerate(obtener_grupos_obligatorios_db(), start=1):
+                clave = str(grupo["username"] or "").lower()
+                marca = marcas.get(clave, "❔")
+                lineas.append(
+                    f"{indice}. {marca} <b>{html.escape(str(grupo['nombre']))}</b>"
+                )
+
+            if estado["errores"]:
+                lineas.extend([
+                    "",
+                    "⚠️ Hay grupos cuya consulta a Telegram devolvió error; "
+                    "se marcan con ⚠️ y no se asumen como membresía confirmada.",
+                ])
             texto_membresia = "\n".join(lineas)
 
         await safe_query_edit_message(query,
@@ -2781,97 +3928,55 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             captura["objetivo_tipo"],
             captura["objetivo_id"],
         )
-
-        lineas = [
-            "📊 <b>ACTIVIDAD REGISTRADA</b>",
-            "",
-            "🕐 <b>Volumen</b>",
-            f"• Última hora: <b>{resumen['hora']}</b>",
-            f"• Hoy: <b>{resumen['dia']}</b>",
-            f"• Semana: <b>{resumen['semana']}</b>",
-            f"• Mes: <b>{resumen['mes']}</b>",
-            "",
-            "📦 <b>Tipos de contenido este mes</b>",
-        ]
-
-        if resumen["tipos_mes"]:
-            for fila in resumen["tipos_mes"][:8]:
-                lineas.append(
-                    f"• {fila['tipo_contenido']}: <b>{fila['total']}</b>"
-                )
-        else:
-            lineas.append("• Sin actividad registrada todavía.")
-
-        lineas.extend(["", "📍 <b>Actividad por grupo este mes</b>"])
-
-        if resumen["grupos_mes"]:
-            for fila in resumen["grupos_mes"][:7]:
-                lineas.append(
-                    f"• {fila['grupo']}: <b>{fila['total']}</b>"
-                )
-        else:
-            lineas.append("• Sin actividad registrada todavía.")
-
-        ritmo_pub = resumen_frecuencia_publicidad_db(
+        por_grupos = resumen_por_grupos_orma(
             captura["objetivo_tipo"],
             captura["objetivo_id"],
         )
-        ritmo_txt = texto_ritmo_publicitario(ritmo_pub)
 
-        lineas.extend([
+        lineas = [
+            "📊 <b>ACTIVIDAD POR GRUPO</b>",
             "",
-            "📣 <b>Ritmo publicitario observado</b>",
-            f"• Última hora: <b>{ritmo_pub['ultima_hora']}</b>",
-            f"• Permitidas última hora: <b>{ritmo_pub['permitidas_hora']}</b>",
-            f"• Rechazadas última hora: <b>{ritmo_pub['rechazadas_hora']}</b>",
-            f"• Últimas 24 h: <b>{ritmo_pub['ultimas_24h']}</b>",
-            f"• Promedio equivalente / hora (24 h): "
-            f"<b>{ritmo_pub['promedio_por_hora_24h']}</b>",
-            f"• Frecuencia promedio: <b>{ritmo_txt['frecuencia']}</b>",
-            f"• Último intervalo: <b>{ritmo_txt['ultimo_intervalo']}</b>",
-            f"• Última publicidad: "
-            f"<b>{formatear_fecha_peru(ritmo_pub['ultima_publicidad'])}</b>",
-        ])
+            (
+                f"Global: H <b>{resumen['hora']}</b> · "
+                f"D <b>{resumen['dia']}</b> · "
+                f"S <b>{resumen['semana']}</b> · "
+                f"M <b>{resumen['mes']}</b>"
+            ),
+            "",
+        ]
 
-        if ritmo_pub["grupos_hora"]:
-            lineas.extend(["", "📍 <b>Publicidad por grupo · última hora</b>"])
-            for fila in ritmo_pub["grupos_hora"][:7]:
+        for grupo in por_grupos:
+            lineas.extend([
+                f"<b>{grupo['indice']}. {nombre_grupo_orma(grupo)}</b>",
+                (
+                    f"• H {grupo['actividad_hora']} · "
+                    f"D {grupo['actividad_dia']} · "
+                    f"S {grupo['actividad_semana']} · "
+                    f"M {grupo['actividad_mes']} · "
+                    f"T <b>{grupo['actividad_total']}</b>"
+                ),
+                f"• Última: <b>{formatear_fecha_peru(grupo['ultima_actividad'])}</b>",
+                "",
+            ])
+
+        lineas.append("📦 <b>TIPOS DE CONTENIDO · MES</b>")
+        if resumen["tipos_mes"]:
+            for fila in resumen["tipos_mes"][:10]:
                 lineas.append(
-                    f"• {fila['grupo']}: <b>{fila['total']}</b>"
+                    f"• {html.escape(str(fila['tipo_contenido']))}: <b>{fila['total']}</b>"
                 )
-
-        lineas.extend([
-            "",
-            "ℹ️ La frecuencia se calcula con publicidad detectada por "
-            "Máximo Control, incluida la que haya sido rechazada por reglas. "
-            "El historial empieza desde que el sistema registra estos eventos.",
-        ])
+        else:
+            lineas.append("• Sin actividad registrada todavía.")
 
         await safe_query_edit_message(query,
             "\n".join(lineas),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 ACTUALIZAR", callback_data=f"orma_actividad:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")],
                 [
-                    InlineKeyboardButton(
-                        "🔄 ACTUALIZAR",
-                        callback_data=f"orma_actividad:{captura_id}",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "⬅️ RETROCEDER",
-                        callback_data=f"orma_ficha:{captura_id}",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "🏠 MENÚ PRINCIPAL",
-                        callback_data="orma_menu_principal",
-                    ),
-                    InlineKeyboardButton(
-                        "🗑 CERRAR",
-                        callback_data="orma_cerrar",
-                    ),
+                    InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
                 ],
             ]),
         )
@@ -2919,11 +4024,13 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if resumen["por_grupo"]:
                 for fila in resumen["por_grupo"][:7]:
-                    lineas.append(
-                        f"• {fila['grupo']}: "
+                    lineas.extend([
+                        f"• <b>{html.escape(str(fila['grupo']))}</b>: "
                         f"➕ {int(fila['entradas'] or 0)} · "
-                        f"➖ {int(fila['salidas'] or 0)}"
-                    )
+                        f"➖ {int(fila['salidas'] or 0)}",
+                        f"  ↳ última entrada: {formatear_fecha_peru(fila['ultima_entrada'])}",
+                        f"  ↳ última salida: {formatear_fecha_peru(fila['ultima_salida'])}",
+                    ])
             else:
                 lineas.append("• Sin movimientos registrados todavía.")
 
@@ -2984,6 +4091,810 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         callback_data="orma_cerrar",
                     ),
                 ],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_audit:"):
+        captura_id = int(data.split(":", 1)[1])
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        await query.answer()
+
+        rol = await obtener_rol_en_grupo(
+            captura["chat_id"],
+            captura["objetivo_id"],
+        )
+        filas = obtener_auditoria_orma_reciente(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            limite=15,
+        )
+        lineas = [
+            "📜 <b>AUDITORÍA /ORMA</b>",
+            "",
+            cabecera_identidad_orma(captura, rol=rol),
+            "",
+            "Últimas acciones:",
+        ]
+        if not filas:
+            lineas.append("• Sin acciones administrativas registradas.")
+        else:
+            for fila in filas:
+                marca = "✅" if fila["resultado"] == "OK" else "❌"
+                grupo = fila["chat_nombre"] or fila["chat_username"] or "GLOBAL"
+                lineas.append(
+                    f"{marca} {formatear_fecha_peru(fila['fecha_evento'])} · "
+                    f"<b>{html.escape(str(fila['accion']))}</b> · "
+                    f"{html.escape(str(grupo))}"
+                )
+
+        await safe_query_edit_message(
+            query,
+            "\n".join(lineas),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 ACTUALIZAR", callback_data=f"orma_audit:{captura_id}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")],
+                [
+                    InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+                ],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_pg_lista:"):
+        captura_id = int(data.split(":", 1)[1])
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        await query.answer()
+        rol = await obtener_rol_en_grupo(
+            captura["chat_id"],
+            captura["objetivo_id"],
+        )
+        await safe_query_edit_message(
+            query,
+            "🎯 <b>CONTROL PUBLICITARIO POR GRUPO</b>\n\n"
+            + cabecera_identidad_orma(captura, rol=rol)
+            + "\n\nSelecciona un grupo. Cada grupo puede tener reglas totalmente "
+              "independientes. HEREDADO significa que obedece al control global 7/7.",
+            parse_mode="HTML",
+            reply_markup=await teclado_lista_publicidad_grupos(
+                captura,
+                context.bot,
+            ),
+        )
+        return
+
+    if data.startswith("orma_pg:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not grupo or grupo["chat_id"] is None:
+            await query.answer("No se pudo resolver ese grupo.", show_alert=True)
+            return
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            chat_username=grupo["username"],
+            chat_nombre=grupo["nombre"],
+            crear=True,
+        )
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            await texto_control_publicidad_grupo(captura, grupo, cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_publicidad_grupo(captura_id, indice, cfg),
+        )
+        return
+
+    if data.startswith("orma_pgm:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            "⚙️ <b>MODO PUBLICITARIO DEL GRUPO</b>\n\n"
+            "HEREDADO: usa la regla global del usuario.\n"
+            "PERSONALIZADO: este grupo tiene tiempos/cantidades propios.\n"
+            "ILIMITADO: registra pero no limita en este grupo.\n"
+            "BLOQUEADO: elimina toda publicidad controlable en este grupo.\n"
+            "EXCLUIDO: no aplica control publicitario en este grupo.\n\n"
+            "El texto normal puro permanece libre.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("HEREDADO", callback_data=f"orma_pgmset:{captura_id}:{indice}:HEREDADO"),
+                    InlineKeyboardButton("PERSONALIZADO", callback_data=f"orma_pgmset:{captura_id}:{indice}:PERSONALIZADO"),
+                ],
+                [
+                    InlineKeyboardButton("ILIMITADO", callback_data=f"orma_pgmset:{captura_id}:{indice}:ILIMITADO"),
+                    InlineKeyboardButton("BLOQUEADO", callback_data=f"orma_pgmset:{captura_id}:{indice}:BLOQUEADO"),
+                ],
+                [InlineKeyboardButton("EXCLUIDO", callback_data=f"orma_pgmset:{captura_id}:{indice}:EXCLUIDO")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_pgmset:"):
+        _, captura_txt, indice_txt, modo = data.split(":", 3)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not grupo or grupo["chat_id"] is None:
+            await query.answer("Grupo no disponible.", show_alert=True)
+            return
+
+        if modo == "HEREDADO":
+            borrar_control_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+            )
+        elif modo == "PERSONALIZADO":
+            copiar_global_a_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                chat_username=grupo["username"],
+                chat_nombre=grupo["nombre"],
+            )
+        else:
+            actualizar_control_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                chat_username=grupo["username"],
+                chat_nombre=grupo["nombre"],
+                modo=modo,
+            )
+
+        registrar_auditoria_orma(
+            usuario.id,
+            captura,
+            "PUBLICIDAD_MODO_GRUPO",
+            grupo=grupo,
+            detalle=modo,
+            resultado="OK",
+        )
+        await query.answer(f"Modo: {modo}")
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            chat_username=grupo["username"],
+            chat_nombre=grupo["nombre"],
+            crear=True,
+        )
+        await safe_query_edit_message(
+            query,
+            await texto_control_publicidad_grupo(captura, grupo, cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_publicidad_grupo(captura_id, indice, cfg),
+        )
+        return
+
+    if data.startswith("orma_pgs:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            "⏱ <b>SEPARACIÓN · ESTE GRUPO</b>\n\n"
+            "Define el tiempo mínimo entre publicidades de esta identidad "
+            "solamente en el grupo seleccionado.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("SIN SEPARACIÓN", callback_data=f"orma_pgsset:{captura_id}:{indice}:0")],
+                [
+                    InlineKeyboardButton("1 min", callback_data=f"orma_pgsset:{captura_id}:{indice}:60"),
+                    InlineKeyboardButton("3 min", callback_data=f"orma_pgsset:{captura_id}:{indice}:180"),
+                    InlineKeyboardButton("5 min", callback_data=f"orma_pgsset:{captura_id}:{indice}:300"),
+                ],
+                [
+                    InlineKeyboardButton("10 min", callback_data=f"orma_pgsset:{captura_id}:{indice}:600"),
+                    InlineKeyboardButton("30 min", callback_data=f"orma_pgsset:{captura_id}:{indice}:1800"),
+                    InlineKeyboardButton("1 h", callback_data=f"orma_pgsset:{captura_id}:{indice}:3600"),
+                ],
+                [InlineKeyboardButton("✍️ MANUAL", callback_data=f"orma_pgin:{captura_id}:{indice}:separacion_minutos")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_pgsset:"):
+        _, captura_txt, indice_txt, segundos_txt = data.split(":", 3)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        segundos = int(segundos_txt)
+        captura = obtener_captura_orma(captura_id)
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+
+        cfg_actual = obtener_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            crear=True,
+        )
+        if str(cfg_actual["modo"]).upper() == "HEREDADO":
+            copiar_global_a_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                chat_username=grupo["username"],
+                chat_nombre=grupo["nombre"],
+            )
+
+        actualizar_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            modo="PERSONALIZADO",
+            separacion_segundos=None if segundos == 0 else segundos,
+        )
+        registrar_auditoria_orma(
+            usuario.id, captura, "PUBLICIDAD_SEPARACION_GRUPO",
+            grupo=grupo,
+            detalle="SIN SEPARACIÓN" if segundos == 0 else texto_separacion(segundos),
+        )
+        await query.answer("Separación actualizada")
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"]
+        )
+        await safe_query_edit_message(
+            query,
+            await texto_control_publicidad_grupo(captura, grupo, cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_publicidad_grupo(captura_id, indice, cfg),
+        )
+        return
+
+    if data.startswith("orma_pgl:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"], crear=True
+        )
+        efectivo = (
+            obtener_control_identidad_db(captura["objetivo_tipo"], captura["objetivo_id"])
+            if str(cfg["modo"]).upper() == "HEREDADO"
+            else cfg
+        )
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            "🔢 <b>LÍMITES · ESTE GRUPO</b>\n\n"
+            f"Hora: <b>{texto_valor_limite(efectivo['limite_hora'])}</b>\n"
+            f"Día: <b>{texto_valor_limite(efectivo['limite_dia'])}</b>\n"
+            f"Semana: <b>{texto_valor_limite(efectivo['limite_semana'])}</b>\n"
+            f"Mes: <b>{texto_valor_limite(efectivo['limite_mes'])}</b>\n"
+            f"Año: <b>{texto_valor_limite(efectivo['limite_anio'])}</b>\n\n"
+            "Selecciona el periodo y escribe el valor manual. 0 significa "
+            "cero publicaciones permitidas en ese periodo.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("HORA", callback_data=f"orma_pgin:{captura_id}:{indice}:limite_hora"),
+                    InlineKeyboardButton("DÍA", callback_data=f"orma_pgin:{captura_id}:{indice}:limite_dia"),
+                ],
+                [
+                    InlineKeyboardButton("SEMANA", callback_data=f"orma_pgin:{captura_id}:{indice}:limite_semana"),
+                    InlineKeyboardButton("MES", callback_data=f"orma_pgin:{captura_id}:{indice}:limite_mes"),
+                ],
+                [InlineKeyboardButton("AÑO", callback_data=f"orma_pgin:{captura_id}:{indice}:limite_anio")],
+                [InlineKeyboardButton("♾ SIN LÍMITES", callback_data=f"orma_pgnolim:{captura_id}:{indice}")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_pgnolim:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        actualizar_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            modo="PERSONALIZADO",
+            limite_hora=None,
+            limite_dia=None,
+            limite_semana=None,
+            limite_mes=None,
+            limite_anio=None,
+        )
+        await query.answer("Límites eliminados en este grupo")
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"]
+        )
+        await safe_query_edit_message(
+            query,
+            await texto_control_publicidad_grupo(captura, grupo, cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_publicidad_grupo(captura_id, indice, cfg),
+        )
+        return
+
+    if data.startswith("orma_pgt:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"], crear=True
+        )
+        efectivo = (
+            obtener_control_identidad_db(captura["objetivo_tipo"], captura["objetivo_id"])
+            if str(cfg["modo"]).upper() == "HEREDADO"
+            else cfg
+        )
+        def marca(campo):
+            return "✅" if bool(efectivo[campo]) else "❌"
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            "🎛 <b>TIPOS · ESTE GRUPO</b>\n\n"
+            "✅ entra al control · ❌ queda libre.\n"
+            "Texto normal puro siempre libre.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(f"{marca('controlar_foto')} FOTO", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_foto"),
+                    InlineKeyboardButton(f"{marca('controlar_video')} VIDEO", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_video"),
+                ],
+                [
+                    InlineKeyboardButton(f"{marca('controlar_gif')} GIF", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_gif"),
+                    InlineKeyboardButton(f"{marca('controlar_documento')} DOCUMENTO", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_documento"),
+                ],
+                [InlineKeyboardButton(f"{marca('controlar_enlace')} ENLACE", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_enlace")],
+                [InlineKeyboardButton(f"{marca('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_custom_emoji")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_pgtog:"):
+        _, captura_txt, indice_txt, campo = data.split(":", 3)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"], crear=True
+        )
+        if str(cfg["modo"]).upper() == "HEREDADO":
+            cfg = copiar_global_a_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                chat_username=grupo["username"],
+                chat_nombre=grupo["nombre"],
+            )
+        nuevo = 0 if bool(cfg[campo]) else 1
+        actualizar_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            modo="PERSONALIZADO",
+            **{campo: nuevo},
+        )
+        await query.answer("Tipo actualizado")
+        # Regresa al panel de tipos.
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"]
+        )
+        def marca2(c):
+            return "✅" if bool(cfg[c]) else "❌"
+        await safe_query_edit_message(
+            query,
+            "🎛 <b>TIPOS · ESTE GRUPO</b>\n\n"
+            "✅ entra al control · ❌ queda libre.\n"
+            "Texto normal puro siempre libre.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(f"{marca2('controlar_foto')} FOTO", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_foto"),
+                    InlineKeyboardButton(f"{marca2('controlar_video')} VIDEO", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_video"),
+                ],
+                [
+                    InlineKeyboardButton(f"{marca2('controlar_gif')} GIF", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_gif"),
+                    InlineKeyboardButton(f"{marca2('controlar_documento')} DOCUMENTO", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_documento"),
+                ],
+                [InlineKeyboardButton(f"{marca2('controlar_enlace')} ENLACE", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_enlace")],
+                [InlineKeyboardButton(f"{marca2('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_custom_emoji")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_pgr:"):
+        _, captura_txt, indice_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        grupo = await resolver_chat_grupo_orma(context.bot, indice)
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        borrar_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+        )
+        registrar_auditoria_orma(
+            usuario.id, captura, "PUBLICIDAD_RESTAURAR_HEREDADO",
+            grupo=grupo, detalle="HEREDADO GLOBAL",
+        )
+        await query.answer("Este grupo vuelve a HEREDADO")
+        cfg = obtener_control_grupo_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["chat_id"],
+            chat_username=grupo["username"],
+            chat_nombre=grupo["nombre"],
+            crear=True,
+        )
+        await safe_query_edit_message(
+            query,
+            await texto_control_publicidad_grupo(captura, grupo, cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_publicidad_grupo(captura_id, indice, cfg),
+        )
+        return
+
+    if data.startswith("orma_pgin:"):
+        _, captura_txt, indice_txt, campo = data.split(":", 3)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        ENTRADAS_ORMA_TOTAL[usuario.id] = {
+            "tipo": "PUBLICIDAD_GRUPO",
+            "captura_id": captura_id,
+            "indice": indice,
+            "campo": campo,
+        }
+        await query.answer()
+        etiqueta = (
+            "minutos de separación"
+            if campo == "separacion_minutos"
+            else campo.replace("limite_", "límite ").replace("_", " ")
+        )
+        await safe_query_edit_message(
+            query,
+            "✍️ <b>VALOR MANUAL · ESTE GRUPO</b>\n\n"
+            f"Escribe ahora <b>{html.escape(etiqueta)}</b>.\n"
+            "Debe ser un número entero igual o mayor que 0.\n\n"
+            "Tu mensaje será eliminado automáticamente.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ CANCELAR", callback_data=f"orma_pg:{captura_id}:{indice}")]
+            ]),
+        )
+        return
+
+    if data.startswith("orma_mod:"):
+        captura_id = int(data.split(":", 1)[1])
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        await query.answer()
+
+        if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
+            await safe_query_edit_message(
+                query,
+                "🛡️ <b>CONTROL TOTAL · MODERACIÓN</b>\n\n"
+                + cabecera_identidad_orma(captura)
+                + "\n\n⚠️ Las acciones de miembro (mute/ban/expulsión) "
+                  "solo aplican a identidades USUARIO/BOT.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")]
+                ]),
+            )
+            return
+
+        rol = await obtener_rol_en_grupo(
+            captura["chat_id"],
+            captura["objetivo_id"],
+        )
+        await safe_query_edit_message(
+            query,
+            "🛡️ <b>CONTROL TOTAL · MODERACIÓN 7/7</b>\n\n"
+            + cabecera_identidad_orma(captura, rol=rol)
+            + "\n\nSelecciona una acción. Después podrás elegir "
+              "un grupo, varios grupos o los 7.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔇 MUTEAR", callback_data=f"orma_modacc:{captura_id}:MUTE"),
+                    InlineKeyboardButton("🔊 DESMUTEAR", callback_data=f"orma_modacc:{captura_id}:UNMUTE"),
+                ],
+                [
+                    InlineKeyboardButton("👢 EXPULSAR", callback_data=f"orma_modacc:{captura_id}:EXPULSAR"),
+                    InlineKeyboardButton("🚫 BANEAR", callback_data=f"orma_modacc:{captura_id}:BAN"),
+                ],
+                [InlineKeyboardButton("♻️ DESBANEAR", callback_data=f"orma_modacc:{captura_id}:UNBAN")],
+                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_ficha:{captura_id}")],
+                [
+                    InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+                ],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_modacc:"):
+        _, captura_txt, accion = data.split(":", 2)
+        captura_id = int(captura_txt)
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
+        # Por comodidad seleccionamos de inicio el grupo desde donde nació /orma.
+        indice_origen = indice_grupo_orma_por_username(captura["chat_username"])
+        if indice_origen and not estado["grupos"]:
+            estado["grupos"].add(indice_origen)
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            f"{texto_accion_moderacion(accion)} · <b>SELECCIONAR GRUPOS</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + "\n\nSelecciona uno, varios o TODOS 7/7.",
+            parse_mode="HTML",
+            reply_markup=teclado_seleccion_moderacion(
+                captura_id,
+                accion,
+                estado["grupos"],
+            ),
+        )
+        return
+
+    if data.startswith("orma_modtog:"):
+        _, captura_txt, accion, indice_txt = data.split(":", 3)
+        captura_id = int(captura_txt)
+        indice = int(indice_txt)
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
+        if indice in estado["grupos"]:
+            estado["grupos"].remove(indice)
+        else:
+            estado["grupos"].add(indice)
+        await query.answer()
+        captura = obtener_captura_orma(captura_id)
+        await safe_query_edit_message(
+            query,
+            f"{texto_accion_moderacion(accion)} · <b>SELECCIONAR GRUPOS</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + f"\n\nSeleccionados: <b>{len(estado['grupos'])}</b>",
+            parse_mode="HTML",
+            reply_markup=teclado_seleccion_moderacion(
+                captura_id, accion, estado["grupos"]
+            ),
+        )
+        return
+
+    if data.startswith("orma_modall:"):
+        _, captura_txt, accion = data.split(":", 2)
+        captura_id = int(captura_txt)
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
+        estado["grupos"] = set(range(1, 8))
+        await query.answer("Seleccionados 7/7")
+        captura = obtener_captura_orma(captura_id)
+        await safe_query_edit_message(
+            query,
+            f"{texto_accion_moderacion(accion)} · <b>SELECCIONAR GRUPOS</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + "\n\nSeleccionados: <b>7/7</b>",
+            parse_mode="HTML",
+            reply_markup=teclado_seleccion_moderacion(
+                captura_id, accion, estado["grupos"]
+            ),
+        )
+        return
+
+    if data.startswith("orma_modnone:"):
+        _, captura_txt, accion = data.split(":", 2)
+        captura_id = int(captura_txt)
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
+        estado["grupos"] = set()
+        await query.answer("Selección vacía")
+        captura = obtener_captura_orma(captura_id)
+        await safe_query_edit_message(
+            query,
+            f"{texto_accion_moderacion(accion)} · <b>SELECCIONAR GRUPOS</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + "\n\nSeleccionados: <b>0</b>",
+            parse_mode="HTML",
+            reply_markup=teclado_seleccion_moderacion(
+                captura_id, accion, estado["grupos"]
+            ),
+        )
+        return
+
+    if data.startswith("orma_modnext:"):
+        _, captura_txt, accion = data.split(":", 2)
+        captura_id = int(captura_txt)
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
+        captura = obtener_captura_orma(captura_id)
+        if not estado["grupos"]:
+            await query.answer("Selecciona al menos un grupo.", show_alert=True)
+            return
+        await query.answer()
+
+        if accion == "MUTE":
+            await safe_query_edit_message(
+                query,
+                "🔇 <b>DURACIÓN DEL MUTE</b>\n\n"
+                + cabecera_identidad_orma(captura)
+                + f"\n\nGrupos seleccionados: <b>{len(estado['grupos'])}</b>\n"
+                  "Elige un tiempo o introdúcelo manualmente.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("10 min", callback_data=f"orma_moddur:{captura_id}:600"),
+                        InlineKeyboardButton("30 min", callback_data=f"orma_moddur:{captura_id}:1800"),
+                    ],
+                    [
+                        InlineKeyboardButton("1 h", callback_data=f"orma_moddur:{captura_id}:3600"),
+                        InlineKeyboardButton("6 h", callback_data=f"orma_moddur:{captura_id}:21600"),
+                    ],
+                    [
+                        InlineKeyboardButton("24 h", callback_data=f"orma_moddur:{captura_id}:86400"),
+                        InlineKeyboardButton("7 días", callback_data=f"orma_moddur:{captura_id}:604800"),
+                    ],
+                    [InlineKeyboardButton("♾ PERMANENTE", callback_data=f"orma_moddur:{captura_id}:perm")],
+                    [InlineKeyboardButton("✍️ MINUTOS MANUALES", callback_data=f"orma_moddur:{captura_id}:manual")],
+                    [InlineKeyboardButton("⬅️ GRUPOS", callback_data=f"orma_modacc:{captura_id}:MUTE")],
+                ]),
+            )
+            return
+
+        await safe_query_edit_message(
+            query,
+            f"⚠️ <b>CONFIRMAR {texto_accion_moderacion(accion)}</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + f"\n\nGrupos: <b>{len(estado['grupos'])}</b>\n"
+              "La operación se ejecutará grupo por grupo y mostrará "
+              "cuáles tuvieron éxito o fallo.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ CONFIRMAR", callback_data=f"orma_modgo:{captura_id}:{accion}")],
+                [InlineKeyboardButton("❌ CANCELAR", callback_data=f"orma_mod:{captura_id}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_moddur:"):
+        _, captura_txt, valor = data.split(":", 2)
+        captura_id = int(captura_txt)
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, "MUTE")
+        captura = obtener_captura_orma(captura_id)
+        if valor == "manual":
+            ENTRADAS_ORMA_TOTAL[usuario.id] = {
+                "tipo": "MUTE_MANUAL",
+                "captura_id": captura_id,
+            }
+            await query.answer()
+            await safe_query_edit_message(
+                query,
+                "✍️ <b>MUTE · TIEMPO MANUAL</b>\n\n"
+                + cabecera_identidad_orma(captura)
+                + "\n\nEscribe la cantidad de <b>minutos</b>.\n"
+                  "Tu mensaje será eliminado automáticamente.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("❌ CANCELAR", callback_data=f"orma_mod:{captura_id}")]
+                ]),
+            )
+            return
+
+        estado["duracion_segundos"] = None if valor == "perm" else int(valor)
+        detalle = (
+            "PERMANENTE"
+            if valor == "perm"
+            else texto_separacion(int(valor))
+        )
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            "⚠️ <b>CONFIRMAR MUTE</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + f"\n\nGrupos: <b>{len(estado['grupos'])}</b>\n"
+              f"Duración: <b>{detalle}</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ CONFIRMAR", callback_data=f"orma_modgo:{captura_id}:MUTE")],
+                [InlineKeyboardButton("❌ CANCELAR", callback_data=f"orma_mod:{captura_id}")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_modgo:"):
+        _, captura_txt, accion = data.split(":", 2)
+        captura_id = int(captura_txt)
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+        estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
+        if not estado["grupos"]:
+            await query.answer("No hay grupos seleccionados.", show_alert=True)
+            return
+
+        await query.answer("Ejecutando...")
+        await safe_query_edit_message(
+            query,
+            f"⏳ <b>EJECUTANDO {texto_accion_moderacion(accion)}</b>\n\n"
+            f"Objetivo: <code>{captura['objetivo_id']}</code>\n"
+            f"Grupos: <b>{len(estado['grupos'])}</b>\n\n"
+            "Procesando secuencialmente...",
+            parse_mode="HTML",
+        )
+
+        resultados = await ejecutar_moderacion_seleccion_orma(
+            context.bot,
+            usuario.id,
+            captura,
+            accion,
+            estado["grupos"],
+            duracion_segundos=estado.get("duracion_segundos"),
+        )
+
+        await safe_query_edit_message(
+            query,
+            f"🛡️ <b>RESULTADO · {texto_accion_moderacion(accion)}</b>\n\n"
+            + cabecera_identidad_orma(captura)
+            + "\n\n"
+            + texto_resultados_moderacion(resultados),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 REINTENTAR / MODERAR", callback_data=f"orma_mod:{captura_id}")],
+                [InlineKeyboardButton("📜 AUDITORÍA", callback_data=f"orma_audit:{captura_id}")],
+                [InlineKeyboardButton("⬅️ FICHA", callback_data=f"orma_ficha:{captura_id}")],
             ]),
         )
         return
@@ -3412,6 +5323,7 @@ async def control_publicidad_individual_grupos(
         identidad_tipo,
         identidad_id,
         tipo_contenido,
+        chat=chat,
     )
 
     if permitido:
@@ -3558,7 +5470,7 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         texto = (
-            "🛡️ <b>MÁXIMO CONTROL GROUP</b>\n\n"
+            "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
             "Centro privado de administración.\n\n"
             "📌 Responde cualquier mensaje en cualquiera de los grupos "
             "controlados con <code>/orma</code> para abrir su expediente.\n\n"
@@ -3748,6 +5660,129 @@ async def procesar_entrada_control_publicidad(
         or chat.type != ChatType.PRIVATE
     ):
         return
+
+    entrada_total = ENTRADAS_ORMA_TOTAL.get(usuario.id)
+    if entrada_total:
+        try:
+            await mensaje.delete()
+        except TelegramError:
+            pass
+
+        valor_texto = str(mensaje.text or "").strip()
+        try:
+            valor = int(valor_texto)
+            if valor < 0:
+                raise ValueError
+        except ValueError:
+            return
+
+        captura = obtener_captura_orma(entrada_total["captura_id"])
+        if not captura or captura["propietario_id"] != usuario.id:
+            ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+            return
+
+        if entrada_total["tipo"] == "PUBLICIDAD_GRUPO":
+            indice = int(entrada_total["indice"])
+            campo = entrada_total["campo"]
+            grupo = await resolver_chat_grupo_orma(context.bot, indice)
+            if not grupo or grupo["chat_id"] is None:
+                ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+                return
+
+            cfg = obtener_control_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                crear=True,
+            )
+            if str(cfg["modo"]).upper() == "HEREDADO":
+                copiar_global_a_grupo_db(
+                    captura["objetivo_tipo"],
+                    captura["objetivo_id"],
+                    grupo["chat_id"],
+                    chat_username=grupo["username"],
+                    chat_nombre=grupo["nombre"],
+                )
+
+            cambios = {}
+            if campo == "separacion_minutos":
+                cambios["separacion_segundos"] = None if valor == 0 else valor * 60
+            else:
+                cambios[campo] = valor
+
+            actualizar_control_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+                modo="PERSONALIZADO",
+                **cambios,
+            )
+            registrar_auditoria_orma(
+                usuario.id,
+                captura,
+                "PUBLICIDAD_VALOR_MANUAL_GRUPO",
+                grupo=grupo,
+                detalle=f"{campo}={valor}",
+            )
+            ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+
+            cfg = obtener_control_grupo_db(
+                captura["objetivo_tipo"],
+                captura["objetivo_id"],
+                grupo["chat_id"],
+            )
+            panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
+            if panel_id:
+                await safe_edit_message_text(
+                    context.bot,
+                    chat_id=usuario.id,
+                    message_id=panel_id,
+                    text=await texto_control_publicidad_grupo(captura, grupo, cfg),
+                    parse_mode="HTML",
+                    reply_markup=teclado_publicidad_grupo(
+                        captura["id"],
+                        indice,
+                        cfg,
+                    ),
+                )
+            return
+
+        if entrada_total["tipo"] == "MUTE_MANUAL":
+            if valor <= 0:
+                return
+            estado = seleccion_moderacion_orma(
+                usuario.id,
+                captura["id"],
+                "MUTE",
+            )
+            estado["duracion_segundos"] = valor * 60
+            ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+
+            panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
+            if panel_id:
+                await safe_edit_message_text(
+                    context.bot,
+                    chat_id=usuario.id,
+                    message_id=panel_id,
+                    text=(
+                        "⚠️ <b>CONFIRMAR MUTE</b>\n\n"
+                        + cabecera_identidad_orma(captura)
+                        + f"\n\nGrupos: <b>{len(estado['grupos'])}</b>\n"
+                          f"Duración: <b>{valor} minutos</b>"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            "✅ CONFIRMAR",
+                            callback_data=f"orma_modgo:{captura['id']}:MUTE",
+                        )],
+                        [InlineKeyboardButton(
+                            "❌ CANCELAR",
+                            callback_data=f"orma_mod:{captura['id']}",
+                        )],
+                    ]),
+                )
+            return
 
     entrada = ENTRADAS_CONTROL_PUBLICIDAD.get(usuario.id)
     if not entrada:

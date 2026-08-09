@@ -163,6 +163,7 @@ ENTRADAS_ORMA_TOTAL = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
+APP_VERSION = "1.0.0"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -1474,11 +1475,38 @@ def ultima_publicidad_permitida_db(identidad_tipo, identidad_id):
 
 
 def resumen_uso_publicidad_db(identidad_tipo, identidad_id):
+    """Resumen histórico global de la identidad, solo para estadísticas."""
     limites = limites_periodos_publicidad()
     return {
         clave: contar_publicidad_permitida_db(
             identidad_tipo,
             identidad_id,
+            inicio,
+        )
+        for clave, inicio in limites.items()
+    }
+
+
+def resumen_uso_publicidad_grupo_db(
+    identidad_tipo,
+    identidad_id,
+    chat_id,
+):
+    """
+    Consumo efectivo del limitador para un grupo concreto.
+
+    Regla oficial v1.0.0:
+        identidad + grupo + periodo
+
+    Un límite de X publicaciones permite X publicaciones en CADA grupo
+    controlado de forma independiente.
+    """
+    limites = limites_periodos_publicidad()
+    return {
+        clave: contar_publicidad_permitida_grupo_db(
+            identidad_tipo,
+            identidad_id,
+            chat_id,
             inicio,
         )
         for clave, inicio in limites.items()
@@ -1725,7 +1753,9 @@ def evaluar_control_publicidad(
 
     separacion = cfg["separacion_segundos"]
     if separacion is not None and int(separacion) > 0:
-        if alcance == "GRUPO" and chat is not None:
+        # La regla de frecuencia se consume por grupo, aunque la
+        # configuración aplicada provenga del perfil GLOBAL.
+        if chat is not None:
             ultima = ultima_publicidad_permitida_grupo_db(
                 identidad_tipo,
                 identidad_id,
@@ -1767,7 +1797,10 @@ def evaluar_control_publicidad(
         if limite is None:
             continue
 
-        if alcance == "GRUPO" and chat is not None:
+        # Regla oficial: el cupo se consume por identidad + grupo + periodo.
+        # Incluso una regla GLOBAL significa "mismo límite en cada grupo",
+        # nunca "un único contador compartido entre todos los grupos".
+        if chat is not None:
             usados = contar_publicidad_permitida_grupo_db(
                 identidad_tipo,
                 identidad_id,
@@ -1820,12 +1853,27 @@ def resumen_tipos_controlados(cfg):
     return activos, libres
 
 
-def proxima_disponibilidad_separacion(identidad_tipo, identidad_id, cfg):
+def proxima_disponibilidad_separacion(
+    identidad_tipo,
+    identidad_id,
+    cfg,
+    chat_id=None,
+):
     separacion = cfg["separacion_segundos"]
     if separacion is None or int(separacion) <= 0:
         return None
 
-    ultima = ultima_publicidad_permitida_db(identidad_tipo, identidad_id)
+    if chat_id is not None:
+        ultima = ultima_publicidad_permitida_grupo_db(
+            identidad_tipo,
+            identidad_id,
+            int(chat_id),
+        )
+    else:
+        ultima = ultima_publicidad_permitida_db(
+            identidad_tipo,
+            identidad_id,
+        )
     if not ultima:
         return None
 
@@ -1911,9 +1959,10 @@ async def texto_control_publicidad(captura):
         captura["objetivo_tipo"],
         captura["objetivo_id"],
     )
-    uso = resumen_uso_publicidad_db(
+    uso = resumen_uso_publicidad_grupo_db(
         captura["objetivo_tipo"],
         captura["objetivo_id"],
+        captura["chat_id"],
     )
     ritmo = resumen_frecuencia_publicidad_db(
         captura["objetivo_tipo"],
@@ -1924,6 +1973,7 @@ async def texto_control_publicidad(captura):
         captura["objetivo_tipo"],
         captura["objetivo_id"],
         cfg,
+        captura["chat_id"],
     )
     por_grupos = resumen_por_grupos_orma(
         captura["objetivo_tipo"],
@@ -1985,12 +2035,13 @@ async def texto_control_publicidad(captura):
         f"• Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>",
         f"• Próxima por separación: <b>{proxima}</b>",
         "",
-        "🔢 <b>LÍMITES / USO GLOBAL DE LA IDENTIDAD</b>",
+        "🔢 <b>LÍMITES / USO EN ESTE GRUPO</b>",
         f"• Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b> · usados {uso['hora']}",
         f"• Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b> · usados {uso['dia']}",
         f"• Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b> · usados {uso['semana']}",
         f"• Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b> · usados {uso['mes']}",
         f"• Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b> · usados {uso['anio']}",
+        "• Regla: <b>cada grupo lleva su propio contador independiente</b>",
         "",
         "🎛 <b>TIPOS</b>",
         f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>",

@@ -1,0 +1,23 @@
+{
+  "project": "MaximoControlGroup_bot",
+  "telegram_bot": "@MaximoControlGroup_bot",
+  "version": "1.0.0",
+  "status": "RELEASE_CANDIDATE_PREVALIDATED",
+  "base_backup": "R026",
+  "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
+  "timezone": "America/Lima",
+  "date_format": "DD/MM/YYYY HH:mm:ss",
+  "deployment_order": [
+    "GitHub repositorio principal",
+    "JustRunMy.app",
+    "Backup/versionado Oracle",
+    "@BotRespaldosPremium_bot"
+  ],
+  "features": [
+    "Limitador por identidad + grupo + periodo",
+    "Aviso Membresía Publicitaria de 30 segundos",
+    "Botón hacia @MembresiaConsultasDenuncias_bot",
+    "Seguridad reforzada de /orma, /start y /estado"
+  ],
+  "live_validation": "PENDING"
+}

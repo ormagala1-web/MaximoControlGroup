@@ -165,6 +165,12 @@ AVISOS_PUBLICIDAD_ACTIVOS = {}
 
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
+MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
+MEMBRESIA_PUBLICIDAD_BOT_USERNAME = "MembresiaConsultasDenuncias_bot"
+MEMBRESIA_PUBLICIDAD_URL = (
+    f"https://t.me/{MEMBRESIA_PUBLICIDAD_BOT_USERNAME}?start=publicidad"
+)
+
 # Tipos controlables. TEXTO puro continúa siendo libre.
 TIPOS_PUBLICIDAD_CONTROLABLE = {
     "FOTO",
@@ -971,6 +977,41 @@ def es_bot_oficial_exento(user):
         return True
 
     return username_usuario(user) in BOTS_OFICIALES_EXENTOS
+
+
+def es_administrador_maximo(user):
+    """Autoriza únicamente identidades administrativas para paneles internos."""
+    if user is None:
+        return False
+
+    user_id = int(getattr(user, "id", 0) or 0)
+
+    # Telegram representa al administrador anónimo mediante GroupAnonymousBot.
+    if user_id == GROUP_ANONYMOUS_BOT_ID:
+        return True
+
+    permitidos = {
+        int(valor)
+        for valor in (ADMIN_USER_ID, ORMA_ADMIN_USER_ID)
+        if int(valor or 0) > 0
+    }
+    return user_id in permitidos
+
+
+def comando_dirigido_a_maximo(mensaje):
+    """Indica si un comando de grupo pertenece a Máximo Control Group."""
+    texto = str(getattr(mensaje, "text", "") or "").strip()
+    if not texto.startswith("/"):
+        return False
+
+    comando = texto.split(maxsplit=1)[0].lower()
+
+    if "@" in comando:
+        _, destino = comando.split("@", 1)
+        return destino == MAXIMO_BOT_USERNAME.lower()
+
+    # Comandos propios conocidos sin @.
+    return comando in {"/orma", "/start", "/estado"}
 
 
 def nombre_visible_usuario(user):
@@ -1995,6 +2036,12 @@ async def mostrar_aviso_publicidad_temporal(
     motivo,
     disponible=None,
 ):
+    """
+    Aviso comercial temporal cuando una publicación excede el control permitido.
+
+    No expone IDs, reglas internas, límites, motivos técnicos ni datos de moderación.
+    El mensaje permanece como máximo AVISO_PUBLICIDAD_SEGUNDOS (30 s).
+    """
     clave = (chat.id, identidad_id)
     anterior = AVISOS_PUBLICIDAD_ACTIVOS.get(clave)
 
@@ -2007,29 +2054,28 @@ async def mostrar_aviso_publicidad_temporal(
         except TelegramError:
             pass
 
-    extra = ""
-    if disponible is not None:
-        extra = (
-            "\\n⏳ Próxima disponibilidad: "
-            f"<b>{formatear_fecha_peru(disponible.isoformat())}</b>"
-        )
-
-    user_text = f"@{username}" if username else "Sin @username"
+    teclado = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "📣 MEMBRESÍA PUBLICITARIA",
+                url=MEMBRESIA_PUBLICIDAD_URL,
+            )
+        ]
+    ])
 
     aviso = await context.bot.send_message(
         chat_id=chat.id,
         text=(
-            "⛔ <b>PUBLICIDAD NO PERMITIDA</b>\\n\\n"
-            f"👤 <b>Nombre:</b> {nombre}\\n"
-            f"🔗 <b>Usuario:</b> {user_text}\\n"
-            f"🆔 <b>ID:</b> <code>{identidad_id}</code>\\n"
-            f"🏷️ <b>Tipo:</b> {tipo_identidad}\\n"
-            f"📦 <b>Contenido:</b> {tipo_contenido}\\n"
-            f"⚠️ <b>Motivo:</b> {motivo}"
-            f"{extra}\\n\\n"
-            "💬 Puedes continuar escribiendo texto normal."
+            "📣 <b>¿DESEAS PUBLICAR CON MAYOR FRECUENCIA?</b>\n\n"
+            "Has alcanzado el límite de publicidad disponible para este momento.\n\n"
+            "Si deseas ampliar tu frecuencia o tiempo de publicación, "
+            "puedes revisar nuestros planes de <b>Membresía Publicitaria</b>.\n\n"
+            "✨ Consulta las opciones disponibles desde el botón inferior.\n"
+            "⏳ <i>Este aviso se eliminará automáticamente en 30 segundos.</i>"
         ),
         parse_mode="HTML",
+        reply_markup=teclado,
+        disable_web_page_preview=True,
     )
 
     AVISOS_PUBLICIDAD_ACTIVOS[clave] = aviso.message_id
@@ -3536,6 +3582,11 @@ async def orma_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await mensaje.delete()
     except TelegramError:
         logging.exception("No se pudo eliminar /orma en chat=%s", chat.id)
+
+    # Seguridad: el panel interno /orma solo puede abrirlo una identidad
+    # administrativa autorizada. El modo anónimo continúa soportado.
+    if not es_administrador_maximo(ejecutor):
+        return
 
     origen = mensaje.reply_to_message
     if origen is None:
@@ -5457,71 +5508,130 @@ async def registrar_cambio_membresia_grupo(
 async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.effective_message
     usuario = update.effective_user
+    chat = update.effective_chat
 
-    if not mensaje or not usuario:
+    if not mensaje or not usuario or not chat:
+        return
+
+    # En grupos, los comandos operativos no generan respuestas públicas.
+    if chat.type != ChatType.PRIVATE:
+        if comando_dirigido_a_maximo(mensaje):
+            try:
+                await mensaje.delete()
+            except TelegramError:
+                pass
+        return
+
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        pass
+
+    if not es_administrador_maximo(usuario):
         return
 
     registrar_usuario_membresia(usuario)
 
-    if update.effective_chat and update.effective_chat.type == ChatType.PRIVATE:
+    texto = (
+        "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
+        "Centro privado de administración.\n\n"
+        "📌 Responde cualquier mensaje en cualquiera de los grupos "
+        "controlados con <code>/orma</code> para abrir su expediente.\n\n"
+        "🧹 Los comandos y datos operativos se eliminan "
+        "automáticamente para mantener el panel limpio."
+    )
+    teclado = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
+    ]])
+
+    panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
+    if panel_id:
         try:
-            await mensaje.delete()
-        except TelegramError:
-            pass
-
-        texto = (
-            "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
-            "Centro privado de administración.\n\n"
-            "📌 Responde cualquier mensaje en cualquiera de los grupos "
-            "controlados con <code>/orma</code> para abrir su expediente.\n\n"
-            "🧹 Los comandos y datos operativos se eliminan "
-            "automáticamente para mantener el panel limpio."
-        )
-        teclado = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
-        ]])
-
-        panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
-        if panel_id:
-            try:
-                await safe_edit_message_text(context.bot,
-                    chat_id=usuario.id,
-                    message_id=panel_id,
-                    text=texto,
-                    parse_mode="HTML",
-                    reply_markup=teclado,
-                )
+            await safe_edit_message_text(
+                context.bot,
+                chat_id=usuario.id,
+                message_id=panel_id,
+                text=texto,
+                parse_mode="HTML",
+                reply_markup=teclado,
+            )
+            return
+        except TelegramError as error:
+            if "message is not modified" in str(error).lower():
                 return
-            except TelegramError as error:
-                if "message is not modified" in str(error).lower():
-                    return
 
-        enviado = await context.bot.send_message(
-            chat_id=usuario.id,
-            text=texto,
-            parse_mode="HTML",
-            reply_markup=teclado,
-        )
-        PANELES_ORMA[usuario.id] = enviado.message_id
-        guardar_panel_orma_db(usuario.id, enviado.message_id)
+    enviado = await context.bot.send_message(
+        chat_id=usuario.id,
+        text=texto,
+        parse_mode="HTML",
+        reply_markup=teclado,
+    )
+    PANELES_ORMA[usuario.id] = enviado.message_id
+    guardar_panel_orma_db(usuario.id, enviado.message_id)
 
 
 async def maximo_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.effective_message
-    if not mensaje:
+    usuario = update.effective_user
+    chat = update.effective_chat
+
+    if not mensaje or not usuario or not chat:
+        return
+
+    # Nunca exponer estado operativo en grupos.
+    if chat.type != ChatType.PRIVATE:
+        if comando_dirigido_a_maximo(mensaje):
+            try:
+                await mensaje.delete()
+            except TelegramError:
+                pass
+        return
+
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        pass
+
+    if not es_administrador_maximo(usuario):
         return
 
     hora_peru = datetime.now(ZONA_PERU).strftime("%d/%m/%Y %H:%M:%S")
-    await mensaje.reply_text(
-        "✅ MaximoControlGroup operativo\n"
-        "🔐 Membresía: 7/7 activa\n"
-        "🌐 Moderación: 7 grupos oficiales + @Orma_Pruebas\n"
-        "🌐 Regla 7/7: usuarios, administradores y bots externos\n"
-        "✅ Bots oficiales y administrativos: excluidos de raíz\n"
-        "🚫 Castigos/baneos: desactivados\n"
-        "🛡️ Control publicitario general: pendiente\n"
-        f"🇵🇪 Hora Perú: {hora_peru}"
+    respuesta = await context.bot.send_message(
+        chat_id=usuario.id,
+        text=(
+            "✅ <b>MaximoControlGroup operativo</b>\n"
+            "🔐 Panel administrativo privado\n"
+            f"🇵🇪 Hora Perú: <b>{hora_peru}</b>"
+        ),
+        parse_mode="HTML",
     )
+    asyncio.create_task(eliminar_mensaje_despues(respuesta, 30))
+
+
+async def limpiar_comandos_maximo_en_grupos(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """
+    Elimina silenciosamente comandos dirigidos a @MaximoControlGroup_bot
+    dentro de grupos. No responde ni revela datos operativos.
+    """
+    mensaje = update.effective_message
+    chat = update.effective_chat
+
+    if (
+        not mensaje
+        or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not es_grupo_controlado(chat)
+        or not comando_dirigido_a_maximo(mensaje)
+    ):
+        return
+
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        pass
 
 
 async def control_membresia_grupos(
@@ -6102,6 +6212,13 @@ async def main():
             control_publicidad_individual_grupos,
         ),
         group=1,
+    )
+    maximo_app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & filters.COMMAND,
+            limpiar_comandos_maximo_en_grupos,
+        ),
+        group=5,
     )
     maximo_app.add_handler(
         MessageHandler(

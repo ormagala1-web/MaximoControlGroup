@@ -3,11 +3,12 @@ import asyncio
 import logging
 import sqlite3
 import html
+import json
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, BotCommand, BotCommandScopeAllPrivateChats
 from telegram.constants import ChatType
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -70,6 +71,8 @@ async def safe_query_edit_message(
     reply_markup=None,
     **kwargs,
 ):
+    if str(getattr(query, "data", "") or "").startswith("orma_"):
+        text = aplicar_version_orma(text)
     try:
         return await query.edit_message_text(
             text=text,
@@ -163,8 +166,38 @@ ENTRADAS_ORMA_TOTAL = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.1.0"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
+VERSION_INFO_PATH = os.path.join(os.path.dirname(__file__), "VERSION_INFO.json")
+
+
+def obtener_version_info_orma():
+    try:
+        with open(VERSION_INFO_PATH, "r", encoding="utf-8") as archivo:
+            datos = json.load(archivo)
+    except (OSError, ValueError, TypeError):
+        datos = {}
+    return {
+        "version": str(datos.get("version") or APP_VERSION),
+        "title": str(datos.get("title") or "PANEL /ORMA"),
+        "updated_at": str(datos.get("updated_at") or "10/08/2026 10:24"),
+    }
+
+
+def pie_version_orma():
+    info = obtener_version_info_orma()
+    return (
+        f"<i>v{html.escape(info['version'])} · "
+        f"{html.escape(info['title'])} · {html.escape(info['updated_at'])}</i>"
+    )
+
+
+def aplicar_version_orma(texto):
+    texto = str(texto or "")
+    pie = pie_version_orma()
+    if pie in texto:
+        return texto
+    return f"{texto}\n\n{pie}"
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
 MEMBRESIA_PUBLICIDAD_BOT_USERNAME = "MembresiaConsultasDenuncias_bot"
@@ -3735,138 +3768,148 @@ def teclado_ficha_orma(captura_id):
         ],
     ])
 
+def _valor_limite_activo(valor):
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        return None
+    return numero if numero > 0 else None
+
+
+def _tiempo_hasta_reinicio_periodo(periodo, identidad_tipo, identidad_id, chat_id):
+    ahora = datetime.now(ZONA_PERU)
+    if periodo == "dia":
+        objetivo = (ahora + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif periodo == "semana":
+        dias = 7 - ahora.weekday()
+        objetivo = (ahora + timedelta(days=dias)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif periodo == "mes":
+        if ahora.month == 12:
+            objetivo = ahora.replace(year=ahora.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            objetivo = ahora.replace(month=ahora.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif periodo == "anio":
+        objetivo = ahora.replace(year=ahora.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif periodo == "hora":
+        with conectar_db() as conexion:
+            fila = conexion.execute(
+                """
+                SELECT fecha_evento
+                FROM eventos_publicidad_control
+                WHERE identidad_tipo = ? AND identidad_id = ? AND chat_id = ?
+                  AND decision = 'PERMITIDA'
+                  AND fecha_evento >= ?
+                ORDER BY fecha_evento ASC
+                LIMIT 1
+                """,
+                (
+                    identidad_tipo, int(identidad_id), int(chat_id),
+                    (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+                ),
+            ).fetchone()
+        if not fila or not fila["fecha_evento"]:
+            return None
+        fecha = datetime.fromisoformat(fila["fecha_evento"])
+        if fecha.tzinfo is None:
+            fecha = fecha.replace(tzinfo=timezone.utc)
+        objetivo = (fecha + timedelta(hours=1)).astimezone(ZONA_PERU)
+    else:
+        return None
+    segundos = max(0, int((objetivo - ahora).total_seconds()))
+    return formatear_intervalo_segundos(segundos)
+
+
+def _cfg_efectiva_ficha_grupo(captura, grupo):
+    propia = obtener_control_grupo_db(
+        captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"], crear=False
+    )
+    if propia and str(propia["modo"] or "HEREDADO").upper() != "HEREDADO":
+        return propia, "GRUPO"
+    return obtener_control_identidad_db(captura["objetivo_tipo"], captura["objetivo_id"]), "GLOBAL"
+
+
+def _lineas_restriccion_grupo_ficha(captura, grupo):
+    cfg, alcance = _cfg_efectiva_ficha_grupo(captura, grupo)
+    modo = str(cfg["modo"] or "HEREDADO").upper()
+    if modo in {"HEREDADO", "EXCLUIDO", "ILIMITADO"}:
+        return ["🟢 <b>SIN RESTRICCIONES</b>"]
+    if modo == "BLOQUEADO":
+        return ["🔴 <b>PUBLICIDAD BLOQUEADA</b>"]
+
+    uso = resumen_uso_publicidad_grupo_db(
+        captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"]
+    )
+    etiquetas = {"hora":"HORA", "dia":"DÍA", "semana":"SEMANA", "mes":"MES", "anio":"AÑO"}
+    iconos = {"hora":"⏱", "dia":"📅", "semana":"📆", "mes":"🗓", "anio":"🗓"}
+    lineas=[]
+    sep=_valor_limite_activo(cfg["separacion_segundos"])
+    if sep:
+        disponible=proxima_disponibilidad_separacion(
+            captura["objetivo_tipo"], captura["objetivo_id"], cfg, grupo["chat_id"]
+        )
+        if disponible:
+            restante=max(0,int((disponible-datetime.now(timezone.utc)).total_seconds()))
+            lineas.append(f"⏳ <b>SEPARACIÓN:</b> {formatear_intervalo_segundos(sep)} · disponible en <b>{formatear_intervalo_segundos(restante)}</b>")
+        else:
+            lineas.append(f"⏳ <b>SEPARACIÓN:</b> {formatear_intervalo_segundos(sep)} · <b>DISPONIBLE AHORA</b>")
+
+    for periodo in ("hora","dia","semana","mes","anio"):
+        limite=_valor_limite_activo(cfg[f"limite_{periodo}"])
+        if not limite:
+            continue
+        usados=int(uso.get(periodo,0))
+        restantes=max(0, limite-usados)
+        reloj=_tiempo_hasta_reinicio_periodo(periodo, captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"])
+        estado="AGOTADO" if restantes == 0 else f"RESTAN {restantes}"
+        texto=f"{iconos[periodo]} <b>{etiquetas[periodo]}:</b> {usados}/{limite} · <b>{estado}</b>"
+        if reloj:
+            texto += f" · reinicia/libera en <b>{reloj}</b>"
+        lineas.append(texto)
+    return lineas or ["🟢 <b>SIN RESTRICCIONES</b>"]
+
+
 async def construir_texto_ficha_orma(captura):
     objetivo_id = captura["objetivo_id"]
     rol_origen = await obtener_rol_en_grupo(captura["chat_id"], objetivo_id)
-
     estados = []
     if captura["objetivo_tipo"] in {"USUARIO", "BOT"}:
         estados = await estado_7grupos_orma_concurrente(objetivo_id)
-
     habilitado = (
-        bool(estados)
-        and len(estados) == TOTAL_GRUPOS_OBLIGATORIOS
+        bool(estados) and len(estados) == TOTAL_GRUPOS_OBLIGATORIOS
         and all(item["miembro"] for item in estados)
     ) if captura["objetivo_tipo"] in {"USUARIO", "BOT"} else None
-
-    por_grupos = resumen_por_grupos_orma(
-        captura["objetivo_tipo"],
-        objetivo_id,
-    )
-    estados_por_username = {
-        str(item["username"]).lower(): item
-        for item in estados
-    }
-
-    resumen = obtener_resumen_identidad_orma(
-        captura["objetivo_tipo"],
-        objetivo_id,
-    )
-    capturas_totales = contar_capturas_objetivo_orma(
-        captura["objetivo_tipo"],
-        objetivo_id,
-    )
-
-    primera_observacion = (
-        resumen["primer_contacto"]
-        or resumen["primera_actividad"]
-        or captura["fecha_captura"]
-    )
-    ultima_observacion = (
-        resumen["ultima_actividad"]
-        or resumen["ultima_actualizacion_identidad"]
-        or captura["fecha_captura"]
-    )
+    estados_por_username = {str(item["username"]).lower(): item for item in estados}
+    por_grupos = resumen_por_grupos_orma(captura["objetivo_tipo"], objetivo_id)
 
     lineas = [
-        "🦍 <b>MÁXIMO CONTROL TOTAL · FICHA AVANZADA</b>",
+        "🦍 <b>MÁXIMO CONTROL GROUP · FICHA /ORMA</b>",
         "",
-        cabecera_identidad_orma(
-            captura,
-            rol=rol_origen,
-            habilitado=habilitado,
-        ),
+        cabecera_identidad_orma(captura, rol=rol_origen, habilitado=habilitado),
         "",
-        "📍 <b>CONTROL INMEDIATO DE LOS 7 GRUPOS</b>",
-        "<i>M = membresía/rol · A = actividad · P = publicidad</i>",
+        "📍 <b>ESTADO EN LOS 7 GRUPOS</b>",
     ]
-
     for grupo in por_grupos:
-        clave = str(grupo["username"] or "").lower()
-        estado = estados_por_username.get(clave)
-
+        estado = estados_por_username.get(str(grupo["username"] or "").lower())
         if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
             marca = "⚪"
-            rol = "No aplica"
         elif estado is None:
             marca = "❔"
-            rol = "No disponible"
         elif estado["error"]:
             marca = "⚠️"
-            rol = estado["rol"]
         elif estado["miembro"]:
             marca = "✅"
-            rol = estado["rol"]
         else:
             marca = "❌"
-            rol = estado["rol"]
-
-        lineas.extend([
-            "",
-            f"<b>{grupo['indice']}. {marca} {nombre_grupo_orma(grupo)}</b>",
-            f"M: <b>{html.escape(str(rol))}</b>",
-            (
-                "A: "
-                f"H {grupo['actividad_hora']} · "
-                f"D {grupo['actividad_dia']} · "
-                f"S {grupo['actividad_semana']} · "
-                f"M {grupo['actividad_mes']} · "
-                f"T <b>{grupo['actividad_total']}</b>"
-            ),
-            (
-                "P: "
-                f"H {grupo['pub_hora']} · "
-                f"24h {grupo['pub_24h']} · "
-                f"T <b>{grupo['pub_total']}</b> "
-                f"(✅ {grupo['pub_permitidas']} · ⛔ {grupo['pub_bloqueadas']})"
-            ),
-        ])
+        lineas.extend(["", f"<b>{grupo['indice']}. {marca} {nombre_grupo_orma(grupo)}</b>"])
+        lineas.extend(_lineas_restriccion_grupo_ficha(captura, grupo))
 
     lineas.extend([
         "",
-        "📊 <b>TOTALES</b>",
-        (
-            f"• Actividad: H {resumen['actividad_hora']} · "
-            f"D {resumen['actividad_dia']} · "
-            f"S {resumen['actividad_semana']} · "
-            f"M {resumen['actividad_mes']} · "
-            f"T <b>{resumen['actividad_total']}</b>"
-        ),
-        (
-            f"• Publicidad: <b>{resumen['publicidad_total']}</b> "
-            f"(✅ {resumen['publicidad_permitida']} · "
-            f"⛔ {resumen['publicidad_bloqueada']})"
-        ),
-        f"• Entradas / salidas: <b>{resumen['entradas']} / {resumen['salidas']}</b>",
-        "",
-        "🕐 <b>SEGUIMIENTO · HORA PERÚ</b>",
-        f"• Primera observación: <b>{formatear_fecha_peru(primera_observacion)}</b>",
-        f"• Última actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>",
-        f"• Capturas /orma: <b>{capturas_totales}</b>",
-        "",
         "📌 <b>CAPTURA ACTUAL</b>",
         f"• Grupo: <b>{html.escape(str(captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']))}</b>",
-        f"• Mensaje: <code>{captura['mensaje_origen_id']}</code>",
         f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>",
     ])
-
-    texto = "\n".join(lineas)
-    if len(texto) > 4050:
-        texto = texto[:3970] + (
-            "\n\n<i>Ficha abreviada por límite de Telegram. "
-            "Los paneles inferiores conservan el detalle completo.</i>"
-        )
-    return texto
+    return aplicar_version_orma("\n".join(lineas))
 
 async def mostrar_ficha_orma_privada(bot, propietario_id, captura_id):
     captura = obtener_captura_orma(captura_id)
@@ -4209,6 +4252,12 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = query.data or ""
+
+    # Todo callback /orma trabaja sobre la ventana visible actual. Así evitamos
+    # que una ficha nueva se abra debajo dejando una ventana anterior huérfana.
+    if query.message is not None and str(data).startswith("orma_"):
+        PANELES_ORMA[usuario.id] = query.message.message_id
+        guardar_panel_orma_db(usuario.id, query.message.message_id)
 
     if data == "orma_cerrar":
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
@@ -5915,11 +5964,8 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.effective_message
     usuario = update.effective_user
     chat = update.effective_chat
-
     if not mensaje or not usuario or not chat:
         return
-
-    # En grupos, los comandos operativos no generan respuestas públicas.
     if chat.type != ChatType.PRIVATE:
         if comando_dirigido_a_maximo(mensaje):
             try:
@@ -5927,50 +5973,39 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except TelegramError:
                 pass
         return
-
     try:
         await mensaje.delete()
     except TelegramError:
         pass
-
     if not es_administrador_maximo(usuario):
         return
 
+    # /start es RESET visual y operativo del panel /orma.
+    ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
+    ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+    SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
+    panel_anterior = PANELES_ORMA.pop(usuario.id, None) or obtener_panel_orma_db(usuario.id)
+    if panel_anterior:
+        try:
+            await context.bot.delete_message(chat_id=usuario.id, message_id=panel_anterior)
+        except TelegramError:
+            pass
+    eliminar_panel_orma_db(usuario.id)
     registrar_usuario_membresia(usuario)
 
-    texto = (
+    texto = aplicar_version_orma(
         "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
         "Centro privado de administración.\n\n"
-        "📌 Responde cualquier mensaje en cualquiera de los grupos "
-        "controlados con <code>/orma</code> para abrir su expediente.\n\n"
-        "🧹 Los comandos y datos operativos se eliminan "
-        "automáticamente para mantener el panel limpio."
+        "📌 Responde cualquier mensaje en cualquiera de los grupos controlados "
+        "con <code>/orma</code> para abrir su expediente.\n\n"
+        "🧹 <code>/start</code> reinicia y limpia el panel /orma."
     )
-    teclado = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
-    ]])
-
-    panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
-    if panel_id:
-        try:
-            await safe_edit_message_text(
-                context.bot,
-                chat_id=usuario.id,
-                message_id=panel_id,
-                text=texto,
-                parse_mode="HTML",
-                reply_markup=teclado,
-            )
-            return
-        except TelegramError as error:
-            if "message is not modified" in str(error).lower():
-                return
-
+    teclado = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👥 CLIENTES EDITADOS", callback_data="orma_clientes_editados:0")],
+        [InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")],
+    ])
     enviado = await context.bot.send_message(
-        chat_id=usuario.id,
-        text=texto,
-        parse_mode="HTML",
-        reply_markup=teclado,
+        chat_id=usuario.id, text=texto, parse_mode="HTML", reply_markup=teclado
     )
     PANELES_ORMA[usuario.id] = enviado.message_id
     guardar_panel_orma_db(usuario.id, enviado.message_id)
@@ -6668,6 +6703,14 @@ async def main():
 
     await iniciar_aplicacion(maximo_app)
     await iniciar_aplicacion(union_app)
+
+    # Menú de comandos privado: un único /start siempre disponible.
+    try:
+        await maximo_app.bot.set_my_commands([
+            BotCommand("start", "Abrir / reiniciar panel")
+        ], scope=BotCommandScopeAllPrivateChats())
+    except TelegramError:
+        logging.exception("No se pudo fijar /start como comando único de Máximo.")
 
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")

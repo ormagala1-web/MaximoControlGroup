@@ -1,0 +1,41 @@
+MÁXIMO CONTROL GROUP v1.1.0 — AUDITORÍA Y MEJORA /ORMA
+=========================================================
+
+BASE REAL
+- Respaldo origen: R034
+- Versión origen: v1.0.1
+- Commit origen documentado: 943de18a82b2e0b7fb837b5eed76335f269ba809
+- Rama: motor-recuperacion-premium
+- Base de datos incluida: preservada sin modificaciones
+
+ALCANCE CERRADO
+- Se modifica únicamente /orma, /start privado, navegación y presentación/versionado del panel privado.
+- No se modifica la regla raíz 7/7, control automático de grupos, ni lógica raíz de membresía/publicidad.
+
+MEJORAS IMPLEMENTADAS
+1. /start único y persistente en el menú privado de comandos.
+2. /start funciona como reset visual/operativo del panel /orma.
+3. El callback /orma registra siempre la ventana visible actual como panel canónico para evitar ventanas huérfanas.
+4. Ficha /orma ejecutiva: siempre 7 grupos, eliminando M/A/P y métricas cero innecesarias.
+5. Cada grupo muestra SIN RESTRICCIONES o solo las restricciones efectivamente activas.
+6. Restricciones muestran consumo, cupo restante y reloj de reinicio/liberación cuando corresponde.
+7. Modo BLOQUEADO se muestra de forma explícita.
+8. Versión, título y fecha visibles mediante metadata real VERSION_INFO.json en menú y submenús /orma.
+
+VERSIÓN
+- v1.1.0
+- Título: FICHA /ORMA EJECUTIVA Y LIMPIEZA DE PANEL
+- Actualizada: 10/08/2026 10:24 America/Lima
+- Estado: CANDIDATE
+- No declarar STABLE hasta prueba real en Telegram/JustRunMy.
+
+VALIDACIÓN LOCAL
+- python -m py_compile bot.py: PASS
+- python -m py_compile agente_respaldo_remoto.py: PASS
+- SHA-256 bot.py: 5445ca2a22dcd16928364380818caef560a6652d1d694939a56c3220ea9a4b2a
+
+ORDEN DE PROMOCIÓN OBLIGATORIO
+1. GitHub
+2. JustRunMy
+3. Oracle
+4. Respaldo operativo exclusivamente desde @BotRespaldosPremium_bot

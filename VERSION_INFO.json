@@ -1,8 +1,8 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.1",
-  "status": "PREVALIDATED",
+  "version": "1.1.0",
+  "status": "CANDIDATE",
   "base_backup": "R026",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
@@ -20,13 +20,16 @@
     "Seguridad reforzada de /orma, /start y /estado"
   ],
   "live_validation": "PENDING",
-  "base_version": "1.0.0",
-  "title": "CLIENTES EDITADOS Y GESTIÓN PERSISTENTE",
+  "base_version": "1.0.1",
+  "title": "FICHA /ORMA EJECUTIVA Y LIMPIEZA DE PANEL",
   "changes": [
-    "Nuevo botón CLIENTES EDITADOS en el menú privado /orma",
-    "Registro persistente de usuarios y bots que reciben una edición",
-    "Reapertura posterior de la ficha sin responder nuevamente un mensaje",
-    "Acceso para desbloquear, cambiar límites, publicaciones, separación, tipos y reglas por grupo",
-    "Paginación de clientes editados"
-  ]
+    "Solo se modifica la capa privada /orma; reglas raíz preservadas",
+    "/start queda como único comando visible y reinicia el panel privado",
+    "/start limpia estados operativos y reemplaza el panel anterior por un único menú",
+    "Corrección de navegación para reutilizar la ventana /orma visible y evitar paneles huérfanos",
+    "Ficha /orma simplificada: siempre 7 grupos, sin métricas de actividad/publicidad innecesarias",
+    "La ficha muestra solo restricciones activas, consumo, cupo restante y reloj de liberación/reinicio",
+    "Versión, título de mejora y fecha visibles en menú y submenús /orma"
+  ],
+  "updated_at": "10/08/2026 10:24"
 }

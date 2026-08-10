@@ -163,7 +163,7 @@ ENTRADAS_ORMA_TOTAL = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -437,6 +437,30 @@ def inicializar_base_datos():
                 mensaje_origen_id INTEGER NOT NULL,
                 fecha_captura TEXT NOT NULL
             )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS clientes_editados (
+                identidad_tipo TEXT NOT NULL,
+                identidad_id INTEGER NOT NULL,
+                username TEXT,
+                nombre TEXT,
+                es_bot INTEGER NOT NULL DEFAULT 0,
+                ultima_captura_id INTEGER,
+                ultima_accion TEXT,
+                fecha_primera_edicion TEXT NOT NULL,
+                fecha_ultima_edicion TEXT NOT NULL,
+                PRIMARY KEY (identidad_tipo, identidad_id)
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_clientes_editados_fecha
+            ON clientes_editados (fecha_ultima_edicion DESC)
             """
         )
 
@@ -1302,7 +1326,15 @@ def actualizar_control_identidad_db(
             valores,
         )
         conexion.commit()
-        return cursor.rowcount > 0
+        actualizado = cursor.rowcount > 0
+
+    if actualizado:
+        registrar_cliente_editado_db(
+            identidad_tipo,
+            identidad_id,
+            accion="PUBLICIDAD_GLOBAL",
+        )
+    return actualizado
 
 
 def resetear_control_identidad_db(identidad_tipo, identidad_id):
@@ -1318,6 +1350,11 @@ def resetear_control_identidad_db(identidad_tipo, identidad_id):
         conexion.commit()
 
     obtener_control_identidad_db(identidad_tipo, identidad_id)
+    registrar_cliente_editado_db(
+        identidad_tipo,
+        identidad_id,
+        accion="PUBLICIDAD_GLOBAL_RESETEADA",
+    )
 
 
 def contiene_custom_emoji(mensaje):
@@ -2767,6 +2804,247 @@ async def estado_7grupos_orma_concurrente(objetivo_id):
     return await asyncio.gather(*(consultar(g) for g in grupos if g))
 
 
+
+def registrar_cliente_editado_db(
+    identidad_tipo,
+    identidad_id,
+    *,
+    accion="EDICION",
+):
+    """Registra persistentemente usuarios/bots que ya recibieron una edición."""
+    tipo = str(identidad_tipo or "").upper()
+    if tipo not in {"USUARIO", "BOT"}:
+        return False
+
+    ahora = datetime.now(timezone.utc).isoformat()
+
+    with conectar_db() as conexion:
+        captura = conexion.execute(
+            """
+            SELECT id, objetivo_username, objetivo_nombre, objetivo_es_bot
+            FROM capturas_orma
+            WHERE objetivo_tipo = ?
+              AND objetivo_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (tipo, int(identidad_id)),
+        ).fetchone()
+
+        if not captura:
+            return False
+
+        conexion.execute(
+            """
+            INSERT INTO clientes_editados (
+                identidad_tipo, identidad_id,
+                username, nombre, es_bot,
+                ultima_captura_id, ultima_accion,
+                fecha_primera_edicion, fecha_ultima_edicion
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(identidad_tipo, identidad_id) DO UPDATE SET
+                username = excluded.username,
+                nombre = excluded.nombre,
+                es_bot = excluded.es_bot,
+                ultima_captura_id = excluded.ultima_captura_id,
+                ultima_accion = excluded.ultima_accion,
+                fecha_ultima_edicion = excluded.fecha_ultima_edicion
+            """,
+            (
+                tipo,
+                int(identidad_id),
+                captura["objetivo_username"],
+                captura["objetivo_nombre"],
+                int(captura["objetivo_es_bot"] or 0),
+                int(captura["id"]),
+                str(accion or "EDICION"),
+                ahora,
+                ahora,
+            ),
+        )
+        conexion.commit()
+
+    return True
+
+
+def contar_clientes_editados_db():
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            "SELECT COUNT(*) AS total FROM clientes_editados"
+        ).fetchone()
+    return int(fila["total"] if fila else 0)
+
+
+def obtener_clientes_editados_db(*, limite=10, offset=0):
+    with conectar_db() as conexion:
+        return conexion.execute(
+            """
+            SELECT *
+            FROM clientes_editados
+            ORDER BY fecha_ultima_edicion DESC, identidad_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (int(limite), int(offset)),
+        ).fetchall()
+
+
+def obtener_cliente_editado_db(identidad_tipo, identidad_id):
+    with conectar_db() as conexion:
+        return conexion.execute(
+            """
+            SELECT *
+            FROM clientes_editados
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            LIMIT 1
+            """,
+            (str(identidad_tipo).upper(), int(identidad_id)),
+        ).fetchone()
+
+
+def crear_captura_desde_cliente_editado_db(
+    propietario_id,
+    identidad_tipo,
+    identidad_id,
+):
+    tipo = str(identidad_tipo).upper()
+
+    with conectar_db() as conexion:
+        origen = conexion.execute(
+            """
+            SELECT *
+            FROM capturas_orma
+            WHERE objetivo_tipo = ?
+              AND objetivo_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (tipo, int(identidad_id)),
+        ).fetchone()
+
+        if not origen:
+            return None
+
+        cursor = conexion.execute(
+            """
+            INSERT INTO capturas_orma (
+                propietario_id, objetivo_tipo, objetivo_id,
+                objetivo_username, objetivo_nombre, objetivo_es_bot,
+                chat_id, chat_username, chat_nombre,
+                mensaje_origen_id, fecha_captura
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(propietario_id),
+                tipo,
+                int(identidad_id),
+                origen["objetivo_username"],
+                origen["objetivo_nombre"],
+                int(origen["objetivo_es_bot"] or 0),
+                origen["chat_id"],
+                origen["chat_username"],
+                origen["chat_nombre"],
+                origen["mensaje_origen_id"],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        captura_id = int(cursor.lastrowid)
+
+        conexion.execute(
+            """
+            UPDATE clientes_editados
+            SET ultima_captura_id = ?
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+            """,
+            (captura_id, tipo, int(identidad_id)),
+        )
+        conexion.commit()
+
+    return captura_id
+
+
+def texto_clientes_editados_db(pagina=0, por_pagina=10):
+    total = contar_clientes_editados_db()
+    pagina = max(0, int(pagina))
+    inicio = pagina * int(por_pagina)
+    fin = min(total, inicio + int(por_pagina))
+
+    return (
+        "👥 <b>CLIENTES EDITADOS</b>\n\n"
+        "Usuarios que ya recibieron una edición administrativa quedan "
+        "guardados aquí de forma permanente.\n\n"
+        "Selecciona uno para volver a abrir su ficha y desbloquearlo, "
+        "modificar sus publicaciones, límites, separación, tipos controlados, "
+        "configuración por grupo o cualquier otra opción disponible.\n\n"
+        f"📦 Guardados: <b>{total}</b>\n"
+        f"📄 Mostrando: <b>{inicio + 1 if total else 0}-{fin}</b>"
+    )
+
+
+def teclado_clientes_editados_db(pagina=0, por_pagina=10):
+    total = contar_clientes_editados_db()
+    pagina = max(0, int(pagina))
+    offset = pagina * int(por_pagina)
+    clientes = obtener_clientes_editados_db(limite=por_pagina, offset=offset)
+
+    filas = []
+    for cliente in clientes:
+        username = (
+            "@" + str(cliente["username"]).lstrip("@")
+            if cliente["username"]
+            else ""
+        )
+        nombre = str(cliente["nombre"] or "").strip()
+        visible = username or nombre or str(cliente["identidad_id"])
+
+        try:
+            cfg = obtener_control_identidad_db(
+                cliente["identidad_tipo"],
+                cliente["identidad_id"],
+            )
+            modo = str(cfg["modo"] or "HEREDADO").upper()
+        except Exception:
+            modo = "SIN DATOS"
+
+        filas.append([
+            InlineKeyboardButton(
+                f"👤 {visible} · {modo}",
+                callback_data=(
+                    "orma_cliente_editado:"
+                    f"{cliente['identidad_tipo']}:"
+                    f"{cliente['identidad_id']}"
+                ),
+            )
+        ])
+
+    nav = []
+    if pagina > 0:
+        nav.append(
+            InlineKeyboardButton(
+                "⬅️ ANTERIOR",
+                callback_data=f"orma_clientes_editados:{pagina - 1}",
+            )
+        )
+    if offset + len(clientes) < total:
+        nav.append(
+            InlineKeyboardButton(
+                "SIGUIENTE ➡️",
+                callback_data=f"orma_clientes_editados:{pagina + 1}",
+            )
+        )
+    if nav:
+        filas.append(nav)
+
+    filas.append([
+        InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+        InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+    ])
+    return InlineKeyboardMarkup(filas)
+
+
 def registrar_auditoria_orma(
     propietario_id,
     captura,
@@ -2813,6 +3091,13 @@ def registrar_auditoria_orma(
             ),
         )
         conexion.commit()
+
+    if str(resultado).upper() == "OK":
+        registrar_cliente_editado_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            accion=accion,
+        )
 
 
 def obtener_auditoria_orma_reciente(objetivo_tipo, objetivo_id, limite=15):
@@ -2951,7 +3236,15 @@ def actualizar_control_grupo_db(
             valores,
         )
         conexion.commit()
-        return cursor.rowcount > 0
+        actualizado = cursor.rowcount > 0
+
+    if actualizado:
+        registrar_cliente_editado_db(
+            identidad_tipo,
+            identidad_id,
+            accion="PUBLICIDAD_POR_GRUPO",
+        )
+    return actualizado
 
 
 def borrar_control_grupo_db(identidad_tipo, identidad_id, chat_id):
@@ -2966,6 +3259,12 @@ def borrar_control_grupo_db(identidad_tipo, identidad_id, chat_id):
             (identidad_tipo, int(identidad_id), int(chat_id)),
         )
         conexion.commit()
+
+    registrar_cliente_editado_db(
+        identidad_tipo,
+        identidad_id,
+        accion="PUBLICIDAD_GRUPO_RESETEADA",
+    )
 
 
 def copiar_global_a_grupo_db(
@@ -3938,12 +4237,68 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Los comandos y datos escritos se eliminan automáticamente "
                 "después de ser procesados.",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
-                ]]),
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "👥 CLIENTES EDITADOS",
+                            callback_data="orma_clientes_editados:0",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "🗑 CERRAR",
+                            callback_data="orma_cerrar",
+                        )
+                    ],
+                ]),
             )
         except TelegramError:
             pass
+        return
+
+    if data.startswith("orma_clientes_editados:"):
+        try:
+            pagina = int(data.rsplit(":", 1)[1])
+        except (TypeError, ValueError):
+            pagina = 0
+
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            texto_clientes_editados_db(pagina),
+            parse_mode="HTML",
+            reply_markup=teclado_clientes_editados_db(pagina),
+        )
+        return
+
+    if data.startswith("orma_cliente_editado:"):
+        try:
+            _, tipo, identidad_txt = data.split(":", 2)
+            identidad_id = int(identidad_txt)
+        except (TypeError, ValueError):
+            await query.answer("Cliente no disponible.", show_alert=True)
+            return
+
+        cliente = obtener_cliente_editado_db(tipo, identidad_id)
+        if not cliente:
+            await query.answer("Cliente no disponible.", show_alert=True)
+            return
+
+        captura_id = crear_captura_desde_cliente_editado_db(
+            usuario.id,
+            tipo,
+            identidad_id,
+        )
+        if not captura_id:
+            await query.answer(
+                "No existe una captura válida para este cliente.",
+                show_alert=True,
+            )
+            return
+
+        CAPTURAS_ORMA[usuario.id] = captura_id
+        await query.answer()
+        await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id)
         return
 
     if data.startswith("orma_ficha:"):

@@ -1,8 +1,8 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.2",
-  "status": "CANDIDATA_VALIDACION",
+  "version": "1.0.3",
+  "status": "CANDIDATA_VALIDACION_FINAL",
   "base_backup": "R026",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
@@ -21,13 +21,14 @@
   ],
   "live_validation": "PENDING",
   "base_version": "1.0.1",
-  "title": "RELOJ DE RENOVACIÓN Y PERSISTENCIA CERTIFICADA",
+  "title": "CICLO 24H Y RELOJ BLINDADO",
   "changes": [
-    "Nuevo botón CLIENTES EDITADOS en el menú privado /orma",
-    "Registro persistente de usuarios y bots que reciben una edición",
-    "Reapertura posterior de la ficha sin responder nuevamente un mensaje",
-    "Acceso para desbloquear, cambiar límites, publicaciones, separación, tipos y reglas por grupo",
-    "Paginación de clientes editados"
+    "Ciclo diario móvil de 24 horas desde el momento en que se establece o cambia limite_dia",
+    "Ancla independiente ancla_limite_dia para control global y por grupo",
+    "Migración compatible con restricciones ya existentes",
+    "Reloj de renovación usa el mismo ciclo de 24 horas que el motor real",
+    "Un fallo del reloj no impide abrir /orma",
+    "Versión v1.0.3 visible en paneles"
   ],
   "candidate_changes": [
     "Versión v1.0.2 visible en Ficha Avanzada",
@@ -35,5 +36,14 @@
     "Reloj de renovación/liberación de restricciones",
     "Mantiene los 7 clientes recuperados en la base persistente",
     "No modifica /orma ni la lógica de límites"
+  ],
+  "titulo": "Reloj 24h móvil y /orma blindado",
+  "base": "6139acd / v1.0.2",
+  "cambios": [
+    "Límite diario por ciclos móviles de 24 horas desde la configuración del límite",
+    "Ancla diaria independiente para controles globales y por grupo",
+    "Migración compatible con reglas existentes sin borrar clientes",
+    "Reloj /orma usa la misma ancla que el motor de control",
+    "Un fallo del reloj no impide abrir /orma"
   ]
 }

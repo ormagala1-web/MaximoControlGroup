@@ -163,8 +163,8 @@ ENTRADAS_ORMA_TOTAL = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.2"
-APP_VERSION_TITULO = "RELOJ DE RENOVACIÓN Y PERSISTENCIA CERTIFICADA"
+APP_VERSION = "1.0.3"
+APP_VERSION_TITULO = "CICLO 24H Y RELOJ BLINDADO"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -276,6 +276,7 @@ def inicializar_base_datos():
                 controlar_documento INTEGER NOT NULL DEFAULT 1,
                 controlar_enlace INTEGER NOT NULL DEFAULT 1,
                 controlar_custom_emoji INTEGER NOT NULL DEFAULT 1,
+                ancla_limite_dia TEXT,
                 fecha_actualizacion TEXT NOT NULL,
                 PRIMARY KEY (identidad_tipo, identidad_id)
             )
@@ -303,11 +304,29 @@ def inicializar_base_datos():
                 controlar_documento INTEGER NOT NULL DEFAULT 1,
                 controlar_enlace INTEGER NOT NULL DEFAULT 1,
                 controlar_custom_emoji INTEGER NOT NULL DEFAULT 1,
+                ancla_limite_dia TEXT,
                 fecha_actualizacion TEXT NOT NULL,
                 PRIMARY KEY (identidad_tipo, identidad_id, chat_id)
             )
             """
         )
+
+        # v1.0.3: ancla independiente para ciclos diarios móviles de 24 horas.
+        for tabla in ("control_publicidad_identidades", "control_publicidad_grupos"):
+            if not columna_existe(conexion, tabla, "ancla_limite_dia"):
+                conexion.execute(
+                    f"ALTER TABLE {tabla} ADD COLUMN ancla_limite_dia TEXT"
+                )
+            # Compatibilidad con reglas existentes: el primer ancla se toma de la
+            # última actualización conocida únicamente una vez.
+            conexion.execute(
+                f"""
+                UPDATE {tabla}
+                SET ancla_limite_dia = fecha_actualizacion
+                WHERE limite_dia IS NOT NULL
+                  AND ancla_limite_dia IS NULL
+                """
+            )
 
         conexion.execute(
             """
@@ -1313,7 +1332,12 @@ def actualizar_control_identidad_db(
         return False
 
     obtener_control_identidad_db(identidad_tipo, identidad_id)
-    datos["fecha_actualizacion"] = datetime.now(timezone.utc).isoformat()
+    ahora_actualizacion = datetime.now(timezone.utc).isoformat()
+    if "limite_dia" in datos:
+        datos["ancla_limite_dia"] = (
+            ahora_actualizacion if datos["limite_dia"] is not None else None
+        )
+    datos["fecha_actualizacion"] = ahora_actualizacion
 
     partes = []
     valores = []
@@ -1484,6 +1508,40 @@ def limites_periodos_publicidad():
         "anio": utc_iso(inicio_anio),
     }
 
+
+
+def ciclo_diario_24h_config(cfg, ahora=None):
+    """Devuelve (inicio, siguiente) del ciclo móvil de 24h de la regla efectiva."""
+    ahora = ahora or datetime.now(timezone.utc)
+    ancla_txt = None
+    try:
+        ancla_txt = cfg["ancla_limite_dia"]
+    except (KeyError, IndexError, TypeError):
+        pass
+
+    if not ancla_txt:
+        try:
+            ancla_txt = cfg["fecha_actualizacion"]
+        except (KeyError, IndexError, TypeError):
+            return None, None
+
+    try:
+        ancla = datetime.fromisoformat(str(ancla_txt))
+        if ancla.tzinfo is None:
+            ancla = ancla.replace(tzinfo=timezone.utc)
+        ancla = ancla.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None, None
+
+    if ahora < ancla:
+        return ancla, ancla + timedelta(hours=24)
+
+    ciclo = timedelta(hours=24)
+    transcurrido = (ahora - ancla).total_seconds()
+    ciclos_completos = int(transcurrido // ciclo.total_seconds())
+    inicio = ancla + (ciclo * ciclos_completos)
+    siguiente = inicio + ciclo
+    return inicio, siguiente
 
 def contar_publicidad_permitida_db(identidad_tipo, identidad_id, desde):
     with conectar_db() as conexion:
@@ -1846,18 +1904,24 @@ def evaluar_control_publicidad(
         # Regla oficial: el cupo se consume por identidad + grupo + periodo.
         # Incluso una regla GLOBAL significa "mismo límite en cada grupo",
         # nunca "un único contador compartido entre todos los grupos".
+        desde_periodo = limites[periodo]
+        if periodo == "dia":
+            inicio_diario, _ = ciclo_diario_24h_config(cfg, ahora)
+            if inicio_diario is not None:
+                desde_periodo = inicio_diario.isoformat()
+
         if chat is not None:
             usados = contar_publicidad_permitida_grupo_db(
                 identidad_tipo,
                 identidad_id,
                 chat.id,
-                limites[periodo],
+                desde_periodo,
             )
         else:
             usados = contar_publicidad_permitida_db(
                 identidad_tipo,
                 identidad_id,
-                limites[periodo],
+                desde_periodo,
             )
 
         if usados >= int(limite):
@@ -3229,7 +3293,12 @@ def actualizar_control_grupo_db(
         datos["chat_username"] = chat_username
     if chat_nombre is not None:
         datos["chat_nombre"] = chat_nombre
-    datos["fecha_actualizacion"] = datetime.now(timezone.utc).isoformat()
+    ahora_actualizacion = datetime.now(timezone.utc).isoformat()
+    if "limite_dia" in datos:
+        datos["ancla_limite_dia"] = (
+            ahora_actualizacion if datos["limite_dia"] is not None else None
+        )
+    datos["fecha_actualizacion"] = ahora_actualizacion
 
     partes = [f"{k} = ?" for k in datos]
     valores = list(datos.values())
@@ -3769,13 +3838,17 @@ def _control_efectivo_ficha_por_username(identidad_tipo, identidad_id, username)
     return global_cfg, "GLOBAL"
 
 
-def _uso_publicidad_ficha_por_username(identidad_tipo, identidad_id, username):
+def _uso_publicidad_ficha_por_username(identidad_tipo, identidad_id, username, cfg=None):
     """Consumo real por grupo, usando el username oficial como llave estable."""
     limites = limites_periodos_publicidad()
     clave = str(username or "").lstrip("@").lower()
     resultado = {}
     with conectar_db() as conexion:
         for periodo, inicio in limites.items():
+            if periodo == "dia" and cfg is not None:
+                inicio_diario, _ = ciclo_diario_24h_config(cfg)
+                if inicio_diario is not None:
+                    inicio = inicio_diario.isoformat()
             fila = conexion.execute(
                 """
                 SELECT COUNT(*) AS total
@@ -4027,6 +4100,8 @@ def _linea_reloj_restriccion_ficha(
             identidad_id,
             username,
         )
+    elif periodo == "dia":
+        _, proxima = ciclo_diario_24h_config(cfg)
     else:
         proxima = _proxima_renovacion_ficha(periodo)
 
@@ -4067,6 +4142,7 @@ def _lineas_control_grupo_ficha(captura, grupo, rol):
         captura["objetivo_tipo"],
         captura["objetivo_id"],
         grupo["username"],
+        cfg,
     )
     estado, detalles = _estado_operativo_publicidad_ficha(cfg, uso)
     controlados, libres = _tipos_controlados_ficha(cfg)
@@ -4074,15 +4150,22 @@ def _lineas_control_grupo_ficha(captura, grupo, rol):
     lineas = [f"📣 Publicidad: <b>{estado}</b>"]
     lineas.extend(detalles)
 
-    reloj = _linea_reloj_restriccion_ficha(
-        captura["objetivo_tipo"],
-        captura["objetivo_id"],
-        grupo["username"],
-        cfg,
-        uso,
-    )
-    if reloj:
-        lineas.append(reloj)
+    try:
+        reloj = _linea_reloj_restriccion_ficha(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            grupo["username"],
+            cfg,
+            uso,
+        )
+        if reloj:
+            lineas.append(reloj)
+    except Exception:
+        logging.exception(
+            "Reloj /orma omitido por error objetivo=%s grupo=%s",
+            captura["objetivo_id"],
+            grupo["username"],
+        )
 
     if origen == "PROPIA":
         lineas.append("🎯 Regla: <b>PROPIA DE ESTE GRUPO</b>")

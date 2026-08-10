@@ -3735,6 +3735,167 @@ def teclado_ficha_orma(captura_id):
         ],
     ])
 
+def _control_efectivo_ficha_por_username(identidad_tipo, identidad_id, username):
+    """Configuración efectiva del grupo sin crear ni alterar registros."""
+    global_cfg = obtener_control_identidad_db(identidad_tipo, identidad_id)
+    clave = str(username or "").lstrip("@").lower()
+    with conectar_db() as conexion:
+        propia = conexion.execute(
+            """
+            SELECT *
+            FROM control_publicidad_grupos
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND LOWER(COALESCE(chat_username, '')) = ?
+            ORDER BY fecha_actualizacion DESC
+            LIMIT 1
+            """,
+            (identidad_tipo, int(identidad_id), clave),
+        ).fetchone()
+
+    if propia and str(propia["modo"] or "HEREDADO").upper() != "HEREDADO":
+        return propia, "PROPIA"
+    return global_cfg, "GLOBAL"
+
+
+def _uso_publicidad_ficha_por_username(identidad_tipo, identidad_id, username):
+    """Consumo real por grupo, usando el username oficial como llave estable."""
+    limites = limites_periodos_publicidad()
+    clave = str(username or "").lstrip("@").lower()
+    resultado = {}
+    with conectar_db() as conexion:
+        for periodo, inicio in limites.items():
+            fila = conexion.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM eventos_publicidad_control
+                WHERE identidad_tipo = ?
+                  AND identidad_id = ?
+                  AND LOWER(COALESCE(chat_username, '')) = ?
+                  AND decision = 'PERMITIDA'
+                  AND fecha_evento >= ?
+                """,
+                (identidad_tipo, int(identidad_id), clave, inicio),
+            ).fetchone()
+            resultado[periodo] = int(fila["total"] if fila else 0)
+    return resultado
+
+
+def _tipos_controlados_ficha(cfg):
+    campos = [
+        ("controlar_foto", "Foto"),
+        ("controlar_video", "Video"),
+        ("controlar_gif", "GIF"),
+        ("controlar_documento", "Documento"),
+        ("controlar_enlace", "Enlace"),
+        ("controlar_custom_emoji", "Premium emoji"),
+    ]
+    controlados = [nombre for campo, nombre in campos if bool(cfg[campo])]
+    libres = [nombre for campo, nombre in campos if not bool(cfg[campo])]
+    return controlados, libres
+
+
+def _estado_operativo_publicidad_ficha(cfg, uso):
+    modo = str(cfg["modo"] or "HEREDADO").upper()
+    if modo == "BLOQUEADO":
+        return "🔴 BLOQUEADA", ["🛡 Motivo: <b>Restricción administrativa</b>"]
+    if modo == "EXCLUIDO":
+        return "🟢 SIN CONTROL", ["♾️ Publicidad: <b>FUERA DEL CONTROL INDIVIDUAL</b>"]
+    if modo == "ILIMITADO":
+        return "🟢 SIN RESTRICCIONES", ["♾️ Cupo: <b>ILIMITADO</b>"]
+
+    etiquetas = {
+        "hora": "Hora",
+        "dia": "Día",
+        "semana": "Semana",
+        "mes": "Mes",
+        "anio": "Año",
+    }
+    activos = []
+    agotados = []
+    for periodo, campo in [
+        ("hora", "limite_hora"),
+        ("dia", "limite_dia"),
+        ("semana", "limite_semana"),
+        ("mes", "limite_mes"),
+        ("anio", "limite_anio"),
+    ]:
+        limite = cfg[campo]
+        if limite is None:
+            continue
+        limite = int(limite)
+        usados = int(uso[periodo])
+        quedan = max(0, limite - usados)
+        activos.append((periodo, limite, usados, quedan))
+        if usados >= limite:
+            agotados.append((periodo, limite, usados, quedan))
+
+    lineas = []
+    if agotados:
+        estado = "🔴 BLOQUEADA POR LÍMITE"
+    elif activos or cfg["separacion_segundos"]:
+        estado = "🟡 LIMITADA"
+    else:
+        estado = "🟢 SIN RESTRICCIONES"
+
+    # Solo mostramos límites que realmente existen; nada de filas muertas SIN LÍMITE.
+    for periodo, limite, usados, quedan in activos:
+        lineas.append(
+            f"📊 {etiquetas[periodo]}: <b>{quedan} de {limite} disponibles</b> "
+            f"· usados {usados}"
+        )
+
+    if cfg["separacion_segundos"]:
+        lineas.append(
+            f"⏱ Separación: <b>{texto_separacion(cfg['separacion_segundos'])}</b>"
+        )
+    elif not activos:
+        lineas.append("♾️ Cupo: <b>ILIMITADO</b>")
+
+    return estado, lineas
+
+
+def _lineas_control_grupo_ficha(captura, grupo, rol):
+    if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
+        return ["📣 Publicidad: <b>NO APLICA</b>"]
+
+    rol_txt = str(rol or "").lower()
+    if rol_txt in {"fuera del grupo", "expulsado"}:
+        return ["🚫 Publicidad: <b>NO APLICA · NO ES MIEMBRO</b>"]
+
+    cfg, origen = _control_efectivo_ficha_por_username(
+        captura["objetivo_tipo"],
+        captura["objetivo_id"],
+        grupo["username"],
+    )
+    uso = _uso_publicidad_ficha_por_username(
+        captura["objetivo_tipo"],
+        captura["objetivo_id"],
+        grupo["username"],
+    )
+    estado, detalles = _estado_operativo_publicidad_ficha(cfg, uso)
+    controlados, libres = _tipos_controlados_ficha(cfg)
+
+    lineas = [f"📣 Publicidad: <b>{estado}</b>"]
+    lineas.extend(detalles)
+
+    if origen == "PROPIA":
+        lineas.append("🎯 Regla: <b>PROPIA DE ESTE GRUPO</b>")
+    elif str(cfg["modo"] or "HEREDADO").upper() == "HEREDADO":
+        lineas.append("🌐 Regla: <b>GLOBAL / HEREDADA</b>")
+
+    if len(controlados) == 6:
+        lineas.append("🎛 Tipos: <b>TODOS LOS PUBLICITARIOS CONTROLADOS</b>")
+    elif not controlados:
+        lineas.append("🎛 Tipos: <b>SIN TIPOS CONTROLADOS</b>")
+    else:
+        lineas.append(f"🎛 Controlados: <b>{', '.join(controlados)}</b>")
+        if libres:
+            lineas.append(f"🟢 Libres: <b>{', '.join(libres)}</b>")
+
+    return lineas
+
+
 async def construir_texto_ficha_orma(captura):
     objetivo_id = captura["objetivo_id"]
     rol_origen = await obtener_rol_en_grupo(captura["chat_id"], objetivo_id)
@@ -3758,26 +3919,6 @@ async def construir_texto_ficha_orma(captura):
         for item in estados
     }
 
-    resumen = obtener_resumen_identidad_orma(
-        captura["objetivo_tipo"],
-        objetivo_id,
-    )
-    capturas_totales = contar_capturas_objetivo_orma(
-        captura["objetivo_tipo"],
-        objetivo_id,
-    )
-
-    primera_observacion = (
-        resumen["primer_contacto"]
-        or resumen["primera_actividad"]
-        or captura["fecha_captura"]
-    )
-    ultima_observacion = (
-        resumen["ultima_actividad"]
-        or resumen["ultima_actualizacion_identidad"]
-        or captura["fecha_captura"]
-    )
-
     lineas = [
         "🦍 <b>MÁXIMO CONTROL TOTAL · FICHA AVANZADA</b>",
         "",
@@ -3787,9 +3928,13 @@ async def construir_texto_ficha_orma(captura):
             habilitado=habilitado,
         ),
         "",
-        "📍 <b>CONTROL INMEDIATO DE LOS 7 GRUPOS</b>",
-        "<i>M = membresía/rol · A = actividad · P = publicidad</i>",
+        "📍 <b>ESTADO Y CONTROL POR GRUPO</b>",
     ]
+
+    sin_restricciones = 0
+    limitados = 0
+    bloqueados = 0
+    fuera = 0
 
     for grupo in por_grupos:
         clave = str(grupo["username"] or "").lower()
@@ -3814,50 +3959,36 @@ async def construir_texto_ficha_orma(captura):
         lineas.extend([
             "",
             f"<b>{grupo['indice']}. {marca} {nombre_grupo_orma(grupo)}</b>",
-            f"M: <b>{html.escape(str(rol))}</b>",
-            (
-                "A: "
-                f"H {grupo['actividad_hora']} · "
-                f"D {grupo['actividad_dia']} · "
-                f"S {grupo['actividad_semana']} · "
-                f"M {grupo['actividad_mes']} · "
-                f"T <b>{grupo['actividad_total']}</b>"
-            ),
-            (
-                "P: "
-                f"H {grupo['pub_hora']} · "
-                f"24h {grupo['pub_24h']} · "
-                f"T <b>{grupo['pub_total']}</b> "
-                f"(✅ {grupo['pub_permitidas']} · ⛔ {grupo['pub_bloqueadas']})"
-            ),
+            f"👤 Estado: <b>{html.escape(str(rol))}</b>",
         ])
+
+        operativas = _lineas_control_grupo_ficha(captura, grupo, rol)
+        lineas.extend(operativas)
+
+        primera = operativas[0] if operativas else ""
+        if "NO ES MIEMBRO" in primera or "NO APLICA" in primera:
+            fuera += 1
+        elif "🔴" in primera:
+            bloqueados += 1
+        elif "🟡" in primera:
+            limitados += 1
+        else:
+            sin_restricciones += 1
 
     lineas.extend([
         "",
-        "📊 <b>TOTALES</b>",
-        (
-            f"• Actividad: H {resumen['actividad_hora']} · "
-            f"D {resumen['actividad_dia']} · "
-            f"S {resumen['actividad_semana']} · "
-            f"M {resumen['actividad_mes']} · "
-            f"T <b>{resumen['actividad_total']}</b>"
-        ),
-        (
-            f"• Publicidad: <b>{resumen['publicidad_total']}</b> "
-            f"(✅ {resumen['publicidad_permitida']} · "
-            f"⛔ {resumen['publicidad_bloqueada']})"
-        ),
-        f"• Entradas / salidas: <b>{resumen['entradas']} / {resumen['salidas']}</b>",
+        "📊 <b>RESUMEN DE CONTROL</b>",
+        f"🟢 Sin restricciones: <b>{sin_restricciones} grupos</b>",
+        f"🟡 Con restricciones: <b>{limitados} grupos</b>",
+        f"🔴 Bloqueados: <b>{bloqueados} grupos</b>",
+    ])
+    if fuera:
+        lineas.append(f"⚪ Fuera / no aplica: <b>{fuera} grupos</b>")
+
+    lineas.extend([
         "",
-        "🕐 <b>SEGUIMIENTO · HORA PERÚ</b>",
-        f"• Primera observación: <b>{formatear_fecha_peru(primera_observacion)}</b>",
-        f"• Última actividad: <b>{formatear_fecha_peru(ultima_observacion)}</b>",
-        f"• Capturas /orma: <b>{capturas_totales}</b>",
-        "",
-        "📌 <b>CAPTURA ACTUAL</b>",
-        f"• Grupo: <b>{html.escape(str(captura['chat_nombre'] or captura['chat_username'] or captura['chat_id']))}</b>",
-        f"• Mensaje: <code>{captura['mensaje_origen_id']}</code>",
-        f"• Fecha: <b>{formatear_fecha_peru(captura['fecha_captura'])}</b>",
+        "ℹ️ <i>Solo se muestran restricciones y cupos útiles. "
+        "Los contadores técnicos siguen registrándose internamente.</i>",
     ])
 
     texto = "\n".join(lineas)

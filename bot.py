@@ -163,7 +163,8 @@ ENTRADAS_ORMA_TOTAL = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
+APP_VERSION_TITULO = "RELOJ DE RENOVACIÓN Y PERSISTENCIA CERTIFICADA"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -195,6 +196,14 @@ def columna_existe(conexion, tabla, columna):
         for fila in conexion.execute(f"PRAGMA table_info({tabla})").fetchall()
     }
     return columna in columnas
+
+
+
+def sello_version_panel():
+    return (
+        f"🏷 <b>v{APP_VERSION}</b> · "
+        f"{APP_VERSION_TITULO}"
+    )
 
 
 def inicializar_base_datos():
@@ -2868,163 +2877,6 @@ def registrar_cliente_editado_db(
     return True
 
 
-
-def reconciliar_clientes_editados_db():
-    """
-    Autorrepara CLIENTES EDITADOS sin borrar nada.
-
-    Reconstruye entradas desde:
-    - controles globales realmente editados;
-    - controles propios por grupo;
-    - acciones administrativas /orma exitosas.
-
-    Solo incorpora identidades con una captura /orma reutilizable.
-    """
-    ahora = datetime.now(timezone.utc).isoformat()
-
-    with conectar_db() as conexion:
-        candidatos = {}
-
-        def agregar(tipo, identidad_id, accion, fecha):
-            tipo = str(tipo or "").upper()
-            if tipo not in {"USUARIO", "BOT"}:
-                return
-            clave = (tipo, int(identidad_id))
-            fecha_txt = str(fecha or ahora)
-            actual = candidatos.get(clave)
-            if actual is None or fecha_txt > actual["fecha"]:
-                candidatos[clave] = {
-                    "accion": str(accion or "RECUPERADO"),
-                    "fecha": fecha_txt,
-                }
-
-        for fila in conexion.execute(
-            """
-            SELECT identidad_tipo, identidad_id, modo, fecha_actualizacion
-            FROM control_publicidad_identidades
-            WHERE UPPER(COALESCE(modo, 'HEREDADO')) <> 'HEREDADO'
-            """
-        ).fetchall():
-            agregar(
-                fila["identidad_tipo"],
-                fila["identidad_id"],
-                "RECUPERADO_CONTROL_GLOBAL",
-                fila["fecha_actualizacion"],
-            )
-
-        for fila in conexion.execute(
-            """
-            SELECT identidad_tipo, identidad_id, modo, fecha_actualizacion
-            FROM control_publicidad_grupos
-            WHERE UPPER(COALESCE(modo, 'HEREDADO')) <> 'HEREDADO'
-            """
-        ).fetchall():
-            agregar(
-                fila["identidad_tipo"],
-                fila["identidad_id"],
-                "RECUPERADO_CONTROL_GRUPO",
-                fila["fecha_actualizacion"],
-            )
-
-        for fila in conexion.execute(
-            """
-            SELECT objetivo_tipo, objetivo_id, accion, fecha_evento
-            FROM auditoria_orma_acciones
-            WHERE UPPER(COALESCE(resultado, '')) = 'OK'
-            """
-        ).fetchall():
-            agregar(
-                fila["objetivo_tipo"],
-                fila["objetivo_id"],
-                fila["accion"],
-                fila["fecha_evento"],
-            )
-
-        recuperados = 0
-
-        for (tipo, identidad_id), datos in candidatos.items():
-            captura = conexion.execute(
-                """
-                SELECT id, objetivo_username, objetivo_nombre, objetivo_es_bot,
-                       fecha_captura
-                FROM capturas_orma
-                WHERE objetivo_tipo = ?
-                  AND objetivo_id = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (tipo, identidad_id),
-            ).fetchone()
-
-            if not captura:
-                continue
-
-            existente = conexion.execute(
-                """
-                SELECT fecha_primera_edicion
-                FROM clientes_editados
-                WHERE identidad_tipo = ?
-                  AND identidad_id = ?
-                """,
-                (tipo, identidad_id),
-            ).fetchone()
-
-            primera = (
-                existente["fecha_primera_edicion"]
-                if existente and existente["fecha_primera_edicion"]
-                else str(captura["fecha_captura"] or datos["fecha"] or ahora)
-            )
-
-            cursor = conexion.execute(
-                """
-                INSERT INTO clientes_editados (
-                    identidad_tipo, identidad_id,
-                    username, nombre, es_bot,
-                    ultima_captura_id, ultima_accion,
-                    fecha_primera_edicion, fecha_ultima_edicion
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(identidad_tipo, identidad_id) DO UPDATE SET
-                    username = excluded.username,
-                    nombre = excluded.nombre,
-                    es_bot = excluded.es_bot,
-                    ultima_captura_id = excluded.ultima_captura_id,
-                    fecha_ultima_edicion =
-                        CASE
-                            WHEN clientes_editados.fecha_ultima_edicion IS NULL
-                              OR excluded.fecha_ultima_edicion >
-                                 clientes_editados.fecha_ultima_edicion
-                            THEN excluded.fecha_ultima_edicion
-                            ELSE clientes_editados.fecha_ultima_edicion
-                        END,
-                    ultima_accion =
-                        CASE
-                            WHEN clientes_editados.ultima_accion IS NULL
-                              OR clientes_editados.ultima_accion = ''
-                            THEN excluded.ultima_accion
-                            ELSE clientes_editados.ultima_accion
-                        END
-                """,
-                (
-                    tipo,
-                    identidad_id,
-                    captura["objetivo_username"],
-                    captura["objetivo_nombre"],
-                    int(captura["objetivo_es_bot"] or 0),
-                    int(captura["id"]),
-                    datos["accion"],
-                    primera,
-                    str(datos["fecha"] or ahora),
-                ),
-            )
-            if cursor.rowcount:
-                recuperados += 1
-
-        conexion.commit()
-
-    return recuperados
-
-
 def contar_clientes_editados_db():
     with conectar_db() as conexion:
         fila = conexion.execute(
@@ -3124,14 +2976,15 @@ def crear_captura_desde_cliente_editado_db(
 
 
 def texto_clientes_editados_db(pagina=0, por_pagina=10):
-    reconciliar_clientes_editados_db()
     total = contar_clientes_editados_db()
     pagina = max(0, int(pagina))
     inicio = pagina * int(por_pagina)
     fin = min(total, inicio + int(por_pagina))
 
     return (
-        "👥 <b>CLIENTES EDITADOS</b>\n\n"
+        "👥 <b>CLIENTES EDITADOS</b>\n"
+        + sello_version_panel()
+        + "\n\n"
         "Usuarios que ya recibieron una edición administrativa quedan "
         "guardados aquí de forma permanente.\n\n"
         "Selecciona uno para volver a abrir su ficha y desbloquearlo, "
@@ -3143,7 +2996,6 @@ def texto_clientes_editados_db(pagina=0, por_pagina=10):
 
 
 def teclado_clientes_editados_db(pagina=0, por_pagina=10):
-    reconciliar_clientes_editados_db()
     total = contar_clientes_editados_db()
     pagina = max(0, int(pagina))
     offset = pagina * int(por_pagina)
@@ -3954,198 +3806,6 @@ def _tipos_controlados_ficha(cfg):
     return controlados, libres
 
 
-
-def _formatear_cuenta_regresiva_ficha(segundos):
-    try:
-        segundos = max(0, int(segundos))
-    except (TypeError, ValueError):
-        return "No disponible"
-
-    dias, resto = divmod(segundos, 86400)
-    horas, resto = divmod(resto, 3600)
-    minutos, _ = divmod(resto, 60)
-
-    partes = []
-    if dias:
-        partes.append(f"{dias} d")
-    if horas:
-        partes.append(f"{horas} h")
-    if minutos or not partes:
-        partes.append(f"{minutos} min")
-    return " ".join(partes[:2])
-
-
-def _proxima_renovacion_periodo_ficha(
-    identidad_tipo,
-    identidad_id,
-    username,
-    periodo,
-    usados,
-):
-    """
-    Respeta la lógica REAL vigente:
-    hora = ventana móvil de 60 min;
-    día/semana/mes/año = calendario America/Lima.
-    """
-    ahora_utc = datetime.now(timezone.utc)
-    ahora_lima = ahora_utc.astimezone(ZONA_PERU)
-    clave = str(username or "").lstrip("@").lower()
-
-    if periodo == "hora":
-        if int(usados or 0) <= 0:
-            return None
-
-        desde = (ahora_utc - timedelta(hours=1)).isoformat()
-        with conectar_db() as conexion:
-            fila = conexion.execute(
-                """
-                SELECT fecha_evento
-                FROM eventos_publicidad_control
-                WHERE identidad_tipo = ?
-                  AND identidad_id = ?
-                  AND LOWER(COALESCE(chat_username, '')) = ?
-                  AND decision = 'PERMITIDA'
-                  AND fecha_evento >= ?
-                ORDER BY fecha_evento ASC
-                LIMIT 1
-                """,
-                (
-                    identidad_tipo,
-                    int(identidad_id),
-                    clave,
-                    desde,
-                ),
-            ).fetchone()
-
-        if not fila:
-            return None
-
-        try:
-            base = datetime.fromisoformat(str(fila["fecha_evento"]))
-            if base.tzinfo is None:
-                base = base.replace(tzinfo=timezone.utc)
-            return base.astimezone(timezone.utc) + timedelta(hours=1)
-        except (TypeError, ValueError):
-            return None
-
-    if periodo == "dia":
-        local = (ahora_lima + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-    elif periodo == "semana":
-        dias = 7 - ahora_lima.weekday()
-        local = (ahora_lima + timedelta(days=dias)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-    elif periodo == "mes":
-        if ahora_lima.month == 12:
-            local = ahora_lima.replace(
-                year=ahora_lima.year + 1,
-                month=1,
-                day=1,
-                hour=0,
-                minute=0,
-                second=0,
-                microsecond=0,
-            )
-        else:
-            local = ahora_lima.replace(
-                month=ahora_lima.month + 1,
-                day=1,
-                hour=0,
-                minute=0,
-                second=0,
-                microsecond=0,
-            )
-    elif periodo == "anio":
-        local = ahora_lima.replace(
-            year=ahora_lima.year + 1,
-            month=1,
-            day=1,
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-    else:
-        return None
-
-    return local.astimezone(timezone.utc)
-
-
-def _linea_renovacion_periodo_ficha(
-    identidad_tipo,
-    identidad_id,
-    username,
-    periodo,
-    usados,
-):
-    proxima = _proxima_renovacion_periodo_ficha(
-        identidad_tipo,
-        identidad_id,
-        username,
-        periodo,
-        usados,
-    )
-    if proxima is None:
-        return None
-
-    ahora = datetime.now(timezone.utc)
-    segundos = max(0, int((proxima - ahora).total_seconds()))
-    falta = _formatear_cuenta_regresiva_ficha(segundos)
-    hora_peru = proxima.astimezone(ZONA_PERU).strftime("%d/%m/%Y %H:%M")
-    return f"⏳ Renovación: <b>en {falta}</b> · {hora_peru}"
-
-
-def _linea_separacion_restante_ficha(
-    identidad_tipo,
-    identidad_id,
-    username,
-    separacion_segundos,
-):
-    if not separacion_segundos:
-        return None
-
-    clave = str(username or "").lstrip("@").lower()
-
-    with conectar_db() as conexion:
-        fila = conexion.execute(
-            """
-            SELECT fecha_evento
-            FROM eventos_publicidad_control
-            WHERE identidad_tipo = ?
-              AND identidad_id = ?
-              AND LOWER(COALESCE(chat_username, '')) = ?
-              AND decision = 'PERMITIDA'
-            ORDER BY fecha_evento DESC
-            LIMIT 1
-            """,
-            (identidad_tipo, int(identidad_id), clave),
-        ).fetchone()
-
-    if not fila:
-        return None
-
-    try:
-        ultima = datetime.fromisoformat(str(fila["fecha_evento"]))
-        if ultima.tzinfo is None:
-            ultima = ultima.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return None
-
-    disponible = ultima.astimezone(timezone.utc) + timedelta(
-        seconds=int(separacion_segundos)
-    )
-    ahora = datetime.now(timezone.utc)
-
-    if disponible <= ahora:
-        return "✅ Separación: <b>cumplida · disponible ahora</b>"
-
-    segundos = int((disponible - ahora).total_seconds())
-    falta = _formatear_cuenta_regresiva_ficha(segundos)
-    return f"⏳ Próxima por separación: <b>en {falta}</b>"
-
-
 def _estado_operativo_publicidad_ficha(cfg, uso):
     modo = str(cfg["modo"] or "HEREDADO").upper()
     if modo == "BLOQUEADO":
@@ -4206,6 +3866,190 @@ def _estado_operativo_publicidad_ficha(cfg, uso):
     return estado, lineas
 
 
+
+def _formatear_tiempo_restante_ficha(segundos):
+    segundos = max(0, int(segundos or 0))
+    dias, resto = divmod(segundos, 86400)
+    horas, resto = divmod(resto, 3600)
+    minutos, _ = divmod(resto, 60)
+
+    partes = []
+    if dias:
+        partes.append(f"{dias} d")
+    if horas:
+        partes.append(f"{horas} h")
+    if minutos or not partes:
+        partes.append(f"{minutos} min")
+    return " ".join(partes[:2])
+
+
+def _proxima_renovacion_ficha(periodo):
+    """
+    Respeta exactamente los períodos vigentes del bot:
+    hora = ventana móvil; día/semana/mes/año = calendario America/Lima.
+    """
+    ahora_local = datetime.now(ZONA_PERU)
+
+    if periodo == "dia":
+        return (ahora_local + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).astimezone(timezone.utc)
+
+    if periodo == "semana":
+        dias_hasta_lunes = 7 - ahora_local.weekday()
+        return (ahora_local + timedelta(days=dias_hasta_lunes)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).astimezone(timezone.utc)
+
+    if periodo == "mes":
+        if ahora_local.month == 12:
+            siguiente = ahora_local.replace(
+                year=ahora_local.year + 1,
+                month=1,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        else:
+            siguiente = ahora_local.replace(
+                month=ahora_local.month + 1,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        return siguiente.astimezone(timezone.utc)
+
+    if periodo == "anio":
+        return ahora_local.replace(
+            year=ahora_local.year + 1,
+            month=1,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ).astimezone(timezone.utc)
+
+    return None
+
+
+def _proxima_liberacion_hora_ficha(
+    identidad_tipo,
+    identidad_id,
+    username,
+):
+    clave = str(username or "").lstrip("@").lower()
+    inicio = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT fecha_evento
+            FROM eventos_publicidad_control
+            WHERE identidad_tipo = ?
+              AND identidad_id = ?
+              AND LOWER(COALESCE(chat_username, '')) = ?
+              AND decision = 'PERMITIDA'
+              AND fecha_evento >= ?
+            ORDER BY fecha_evento ASC
+            LIMIT 1
+            """,
+            (
+                identidad_tipo,
+                int(identidad_id),
+                clave,
+                inicio,
+            ),
+        ).fetchone()
+
+    if not fila:
+        return None
+
+    try:
+        fecha = datetime.fromisoformat(str(fila["fecha_evento"]))
+        if fecha.tzinfo is None:
+            fecha = fecha.replace(tzinfo=timezone.utc)
+        return fecha.astimezone(timezone.utc) + timedelta(hours=1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _linea_reloj_restriccion_ficha(
+    identidad_tipo,
+    identidad_id,
+    username,
+    cfg,
+    uso,
+):
+    """
+    Muestra solamente la renovación útil/limitante.
+    No altera contadores ni restricciones.
+    """
+    periodos = [
+        ("hora", "limite_hora"),
+        ("dia", "limite_dia"),
+        ("semana", "limite_semana"),
+        ("mes", "limite_mes"),
+        ("anio", "limite_anio"),
+    ]
+
+    activos = []
+    for periodo, campo in periodos:
+        limite = cfg[campo]
+        if limite is None:
+            continue
+        activos.append(
+            (
+                periodo,
+                int(limite),
+                int(uso[periodo]),
+            )
+        )
+
+    if not activos:
+        return None
+
+    # Priorizar un período agotado; si ninguno está agotado,
+    # mostrar la renovación del límite más corto configurado.
+    elegido = next(
+        (item for item in activos if item[2] >= item[1]),
+        activos[0],
+    )
+    periodo, limite, usados = elegido
+
+    if periodo == "hora":
+        proxima = _proxima_liberacion_hora_ficha(
+            identidad_tipo,
+            identidad_id,
+            username,
+        )
+    else:
+        proxima = _proxima_renovacion_ficha(periodo)
+
+    if proxima is None:
+        return None
+
+    ahora = datetime.now(timezone.utc)
+    restante = max(0, int((proxima - ahora).total_seconds()))
+    faltante = _formatear_tiempo_restante_ficha(restante)
+    fecha_peru = proxima.astimezone(ZONA_PERU).strftime("%d/%m %I:%M %p").lower()
+
+    if usados >= limite:
+        return (
+            f"⏳ Se habilita en: <b>{faltante}</b> "
+            f"· {fecha_peru}"
+        )
+
+    return (
+        f"⏳ Renovación del cupo: <b>{faltante}</b> "
+        f"· {fecha_peru}"
+    )
+
+
 def _lineas_control_grupo_ficha(captura, grupo, rol):
     if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
         return ["📣 Publicidad: <b>NO APLICA</b>"]
@@ -4230,41 +4074,15 @@ def _lineas_control_grupo_ficha(captura, grupo, rol):
     lineas = [f"📣 Publicidad: <b>{estado}</b>"]
     lineas.extend(detalles)
 
-    periodos_activos = [
-        ("hora", "limite_hora"),
-        ("dia", "limite_dia"),
-        ("semana", "limite_semana"),
-        ("mes", "limite_mes"),
-        ("anio", "limite_anio"),
-    ]
-
-    for periodo, campo in periodos_activos:
-        limite = cfg[campo]
-        if limite is None:
-            continue
-
-        usados = int(uso[periodo])
-        renovacion = _linea_renovacion_periodo_ficha(
-            captura["objetivo_tipo"],
-            captura["objetivo_id"],
-            grupo["username"],
-            periodo,
-            usados,
-        )
-        if renovacion:
-            lineas.append(renovacion)
-
-        if usados >= int(limite):
-            break
-
-    separacion_restante = _linea_separacion_restante_ficha(
+    reloj = _linea_reloj_restriccion_ficha(
         captura["objetivo_tipo"],
         captura["objetivo_id"],
         grupo["username"],
-        cfg["separacion_segundos"],
+        cfg,
+        uso,
     )
-    if separacion_restante:
-        lineas.append(separacion_restante)
+    if reloj:
+        lineas.append(reloj)
 
     if origen == "PROPIA":
         lineas.append("🎯 Regla: <b>PROPIA DE ESTE GRUPO</b>")
@@ -4308,6 +4126,7 @@ async def construir_texto_ficha_orma(captura):
 
     lineas = [
         "🦍 <b>MÁXIMO CONTROL TOTAL · FICHA AVANZADA</b>",
+        sello_version_panel(),
         "",
         cabecera_identidad_orma(
             captura,
@@ -7109,7 +6928,6 @@ async def main():
     global MAXIMO_APP_REF, UNION_APP_REF
 
     inicializar_base_datos()
-    reconciliar_clientes_editados_db()
     iniciar_agente_respaldo()
 
     maximo_app = Application.builder().token(BOT_TOKEN).build()

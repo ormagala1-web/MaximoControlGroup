@@ -1,8 +1,8 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.1",
-  "status": "PREVALIDATED",
+  "version": "1.0.2",
+  "status": "CANDIDATA_VALIDACION",
   "base_backup": "R026",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
@@ -20,13 +20,20 @@
     "Seguridad reforzada de /orma, /start y /estado"
   ],
   "live_validation": "PENDING",
-  "base_version": "1.0.0",
-  "title": "CLIENTES EDITADOS Y GESTIÓN PERSISTENTE",
+  "base_version": "1.0.1",
+  "title": "RELOJ DE RENOVACIÓN Y PERSISTENCIA CERTIFICADA",
   "changes": [
     "Nuevo botón CLIENTES EDITADOS en el menú privado /orma",
     "Registro persistente de usuarios y bots que reciben una edición",
     "Reapertura posterior de la ficha sin responder nuevamente un mensaje",
     "Acceso para desbloquear, cambiar límites, publicaciones, separación, tipos y reglas por grupo",
     "Paginación de clientes editados"
+  ],
+  "candidate_changes": [
+    "Versión v1.0.2 visible en Ficha Avanzada",
+    "Versión v1.0.2 visible en CLIENTES EDITADOS",
+    "Reloj de renovación/liberación de restricciones",
+    "Mantiene los 7 clientes recuperados en la base persistente",
+    "No modifica /orma ni la lógica de límites"
   ]
 }

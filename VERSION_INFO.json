@@ -2,7 +2,7 @@
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
   "version": "1.0.4",
-  "status": "CANDIDATE_JUSTRUNMY",
+  "status": "CANDIDATE_JUSTRUNMY_REFINADA",
   "base_backup": "R040",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
@@ -19,17 +19,20 @@
     "Botón hacia @MembresiaConsultasDenuncias_bot",
     "Seguridad reforzada de /orma, /start y /estado"
   ],
-  "live_validation": "PENDING",
+  "live_validation": "PENDING_RETEST",
   "base_version": "1.0.3",
   "title": "CENTRO DE CONTROL DE RAÍZ 7/7",
   "changes": [
-    "@PublicidadContratada_bot incorporado como bot exento de raíz",
-    "Nuevo acceso ⚙️ CONTROL DE RAÍZ 7/7 sin modificar CLIENTES EDITADOS",
-    "Membresía 7/7 activable/pausable desde panel con persistencia SQLite",
-    "Visualización protegida de los 7 grupos oficiales y sus helpdesk",
-    "Administración persistente de bots exentos de raíz",
-    "Control del grupo @Orma_Pruebas desde panel",
-    "Versión v1.0.4 y título visibles en menú principal"
+    "@PublicidadContratada_bot incorporado y protegido como bot exento de raíz",
+    "CLIENTES EDITADOS permanece intacto e independiente",
+    "Centro de Control de Raíz reorganizado en módulos administrativos claros",
+    "Membresía 7/7 con pantalla propia y activación/pausa persistente",
+    "Los 7 grupos oficiales disponen de fichas directas de auditoría y permanecen estructuralmente protegidos",
+    "Bots exentos estructurales protegidos y posibilidad de agregar/quitar bots adicionales desde Telegram",
+    "Tiempos de avisos de membresía y publicidad editables con persistencia SQLite",
+    "Control independiente del grupo @Orma_Pruebas",
+    "Auditoría operativa de raíz visible desde el panel",
+    "No modifica el motor de CLIENTES EDITADOS ni sus controles existentes"
   ],
   "candidate_changes": [
     "Versión v1.0.2 visible en Ficha Avanzada",

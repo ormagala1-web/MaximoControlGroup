@@ -161,11 +161,15 @@ ENTRADAS_CONTROL_PUBLICIDAD = {}
 SELECCIONES_MODERACION_ORMA = {}
 ENTRADAS_ORMA_TOTAL = {}
 
+# Entradas efímeras exclusivas del Centro de Control de Raíz.
+# Clave: propietario_id -> {"accion": str}
+ENTRADAS_RAIZ = {}
+
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.3"
-APP_VERSION_TITULO = "CICLO 24H Y RELOJ BLINDADO"
+APP_VERSION = "1.0.4"
+APP_VERSION_TITULO = "CENTRO DE CONTROL DE RAÍZ 7/7"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -524,8 +528,6 @@ def inicializar_base_datos():
                     nombre = excluded.nombre,
                     enlace = excluded.enlace,
                     helpdesk_username = excluded.helpdesk_username,
-                    obligatorio = 1,
-                    activo = 1,
                     orden = excluded.orden
                 """,
                 (
@@ -550,6 +552,8 @@ def inicializar_base_datos():
         for clave, valor in (
             ("membresia_7de7_activa", "1"),
             ("grupo_pruebas_activo", "1"),
+            ("aviso_membresia_segundos", str(AVISO_MEMBRESIA_SEGUNDOS)),
+            ("aviso_publicidad_segundos", str(AVISO_PUBLICIDAD_SEGUNDOS)),
         ):
             conexion.execute(
                 "INSERT OR IGNORE INTO configuracion_raiz (clave, valor, fecha_actualizacion) VALUES (?, ?, ?)",
@@ -585,21 +589,49 @@ def obtener_config_raiz(clave, predeterminado="1"):
         return str(predeterminado)
 
 
+def guardar_config_raiz(clave, valor):
+    with conectar_db() as conexion:
+        conexion.execute(
+            """INSERT INTO configuracion_raiz (clave, valor, fecha_actualizacion)
+               VALUES (?, ?, ?)
+               ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, fecha_actualizacion=excluded.fecha_actualizacion""",
+            (str(clave), str(valor), datetime.now(timezone.utc).isoformat()),
+        )
+        conexion.commit()
+
+
+def obtener_config_raiz_entero(clave, predeterminado):
+    try:
+        return max(1, int(obtener_config_raiz(clave, predeterminado)))
+    except (TypeError, ValueError):
+        return int(predeterminado)
+
+
 def config_raiz_activa(clave, predeterminado=True):
     return obtener_config_raiz(clave, "1" if predeterminado else "0") == "1"
 
 
 def alternar_config_raiz(clave):
     nuevo = "0" if config_raiz_activa(clave) else "1"
-    with conectar_db() as conexion:
-        conexion.execute(
-            """INSERT INTO configuracion_raiz (clave, valor, fecha_actualizacion)
-               VALUES (?, ?, ?)
-               ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, fecha_actualizacion=excluded.fecha_actualizacion""",
-            (clave, nuevo, datetime.now(timezone.utc).isoformat()),
-        )
-        conexion.commit()
+    guardar_config_raiz(clave, nuevo)
     return nuevo == "1"
+
+
+def obtener_grupos_raiz_db():
+    with conectar_db() as conexion:
+        return conexion.execute(
+            "SELECT * FROM grupos_obligatorios ORDER BY orden ASC"
+        ).fetchall()
+
+
+def obtener_grupo_raiz_db(username):
+    clave = str(username or "").lstrip("@").lower()
+    with conectar_db() as conexion:
+        return conexion.execute(
+            """SELECT * FROM grupos_obligatorios
+               WHERE LOWER(username) = ? LIMIT 1""",
+            (clave,),
+        ).fetchone()
 
 
 def obtener_bots_exentos_raiz_db():
@@ -611,31 +643,51 @@ def obtener_bots_exentos_raiz_db():
 
 def bot_exento_raiz_activo(username):
     clave = str(username or "").lstrip("@").lower()
+    # Los bots estructurales de raíz nunca pueden perder su exención desde UI.
+    if clave in BOTS_OFICIALES_EXENTOS:
+        return True
     try:
         with conectar_db() as conexion:
             fila = conexion.execute(
                 "SELECT activo FROM bots_exentos_raiz WHERE username = ?", (clave,)
             ).fetchone()
-        if fila is not None:
-            return bool(fila["activo"])
+        return bool(fila["activo"]) if fila is not None else False
     except sqlite3.Error:
-        pass
-    return clave in BOTS_OFICIALES_EXENTOS
+        return False
 
 
-def alternar_bot_exento_raiz(username):
+def agregar_bot_exento_raiz(username):
     clave = str(username or "").lstrip("@").lower()
-    actual = bot_exento_raiz_activo(clave)
-    nuevo = 0 if actual else 1
+    if not re.fullmatch(r"[a-z0-9_]{5,32}", clave):
+        raise ValueError("Username de Telegram no válido")
     with conectar_db() as conexion:
         conexion.execute(
             """INSERT INTO bots_exentos_raiz (username, activo, fecha_actualizacion)
-               VALUES (?, ?, ?)
-               ON CONFLICT(username) DO UPDATE SET activo=excluded.activo, fecha_actualizacion=excluded.fecha_actualizacion""",
-            (clave, nuevo, datetime.now(timezone.utc).isoformat()),
+               VALUES (?, 1, ?)
+               ON CONFLICT(username) DO UPDATE SET activo=1, fecha_actualizacion=excluded.fecha_actualizacion""",
+            (clave, datetime.now(timezone.utc).isoformat()),
         )
         conexion.commit()
-    return bool(nuevo)
+    return clave
+
+
+def quitar_bot_exento_raiz(username):
+    clave = str(username or "").lstrip("@").lower()
+    if clave in BOTS_OFICIALES_EXENTOS:
+        return False
+    with conectar_db() as conexion:
+        cursor = conexion.execute(
+            "DELETE FROM bots_exentos_raiz WHERE username = ?", (clave,)
+        )
+        conexion.commit()
+    return cursor.rowcount > 0
+
+
+def bots_exentos_personalizados_raiz():
+    return [
+        fila for fila in obtener_bots_exentos_raiz_db()
+        if fila["username"] not in BOTS_OFICIALES_EXENTOS and bool(fila["activo"])
+    ]
 
 
 def registrar_usuario_membresia(user, union_bot_iniciado=False):
@@ -1349,7 +1401,7 @@ async def mostrar_aviso_union_temporal(
             chat_id,
             user_id,
             aviso.message_id,
-            AVISO_MEMBRESIA_SEGUNDOS,
+            obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS),
         )
     )
     TAREAS_AVISOS_MEMBRESIA[clave] = tarea_borrado
@@ -2268,7 +2320,7 @@ async def eliminar_aviso_publicidad_programado(
     message_id,
 ):
     try:
-        await asyncio.sleep(AVISO_PUBLICIDAD_SEGUNDOS)
+        await asyncio.sleep(obtener_config_raiz_entero("aviso_publicidad_segundos", AVISO_PUBLICIDAD_SEGUNDOS))
         clave = (chat_id, identidad_id)
 
         if AVISOS_PUBLICIDAD_ACTIVOS.get(clave) != message_id:
@@ -4721,58 +4773,204 @@ def texto_accion_moderacion(accion):
 
 
 def texto_centro_control_raiz():
-    grupos = obtener_grupos_obligatorios_db()
     membresia = "ACTIVA" if config_raiz_activa("membresia_7de7_activa") else "PAUSADA"
-    pruebas = "ACTIVO" if config_raiz_activa("grupo_pruebas_activo") else "FUERA DE CONTROL"
-    exentos = sum(1 for fila in obtener_bots_exentos_raiz_db() if bool(fila["activo"]))
+    pruebas = "BAJO CONTROL" if config_raiz_activa("grupo_pruebas_activo") else "FUERA DE CONTROL"
+    grupos = obtener_grupos_raiz_db()
+    personalizados = len(bots_exentos_personalizados_raiz())
     return (
-        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/7</b>\n\n"
-        f"🛡 Membresía obligatoria 7/7: <b>{membresia}</b>\n"
-        f"🌐 Grupos oficiales configurados: <b>{len(grupos)}/7</b>\n"
-        f"🧪 @{GRUPO_PRUEBAS_USERNAME}: <b>{pruebas}</b>\n"
-        f"🤖 Bots exentos activos: <b>{exentos}</b>\n\n"
-        "Este panel administra las mismas reglas operativas de la raíz. "
-        "CLIENTES EDITADOS permanece independiente e intacto."
+        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/7</b>\n"
+        "🏷 <b>v1.0.4 · PANEL EDITABLE SEGURO</b>\n\n"
+        "Estado operativo de las reglas de raíz:\n\n"
+        f"🛡 Membresía 7/7: <b>{membresia}</b>\n"
+        f"🌐 Grupos oficiales estructurales: <b>{len(grupos)}/7</b>\n"
+        f"🤖 Bots exentos fijos: <b>{len(BOTS_OFICIALES_EXENTOS)}</b>\n"
+        f"➕ Bots exentos añadidos: <b>{personalizados}</b>\n"
+        f"🧪 @{GRUPO_PRUEBAS_USERNAME}: <b>{pruebas}</b>\n\n"
+        "Selecciona el módulo que deseas administrar. "
+        "Las identidades estructurales de los 7 grupos y los bots oficiales quedan protegidas."
     )
 
 
 def teclado_centro_control_raiz():
-    marca_m = "🟢" if config_raiz_activa("membresia_7de7_activa") else "🔴"
-    marca_p = "🟢" if config_raiz_activa("grupo_pruebas_activo") else "🔴"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{marca_m} MEMBRESÍA 7/7", callback_data="orma_raiz_toggle_membresia")],
-        [InlineKeyboardButton("🌐 LOS 7 GRUPOS OFICIALES", callback_data="orma_raiz_grupos")],
-        [InlineKeyboardButton("🤖 BOTS EXENTOS", callback_data="orma_raiz_bots")],
-        [InlineKeyboardButton(f"{marca_p} GRUPO DE PRUEBAS", callback_data="orma_raiz_toggle_pruebas")],
-        [InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")],
-        [InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")],
+        [InlineKeyboardButton("🛡 MEMBRESÍA 7/7", callback_data="orma_raiz_membresia")],
+        [InlineKeyboardButton("🌐 GRUPOS OFICIALES 7/7", callback_data="orma_raiz_grupos")],
+        [InlineKeyboardButton("🤖 BOTS EXENTOS / AUTORIZADOS", callback_data="orma_raiz_bots")],
+        [InlineKeyboardButton("⏱ TIEMPOS DE AVISO", callback_data="orma_raiz_tiempos")],
+        [InlineKeyboardButton("🧪 GRUPO DE PRUEBAS", callback_data="orma_raiz_pruebas")],
+        [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
+        [
+            InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+        ],
+    ])
+
+
+def texto_membresia_raiz():
+    activa = config_raiz_activa("membresia_7de7_activa")
+    aviso = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
+    return (
+        "🛡 <b>MEMBRESÍA DE RAÍZ 7/7</b>\n\n"
+        f"Estado: <b>{'🟢 ACTIVA' if activa else '🔴 PAUSADA'}</b>\n"
+        "Regla estructural: <b>7 grupos oficiales obligatorios</b>\n"
+        f"Aviso temporal: <b>{aviso} segundos</b>\n\n"
+        "Al pausar esta regla no se borran grupos, clientes ni historiales. "
+        "Solo se suspende la puerta de membresía 7/7 hasta volver a activarla."
+    )
+
+
+def teclado_membresia_raiz():
+    activa = config_raiz_activa("membresia_7de7_activa")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "🔴 PAUSAR MEMBRESÍA 7/7" if activa else "🟢 ACTIVAR MEMBRESÍA 7/7",
+            callback_data="orma_raiz_membresia_toggle",
+        )],
+        [InlineKeyboardButton("🌐 VER LOS 7 GRUPOS", callback_data="orma_raiz_grupos")],
+        [InlineKeyboardButton("⏱ CONFIGURAR AVISO", callback_data="orma_raiz_tiempos_membresia")],
+        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
     ])
 
 
 def texto_grupos_raiz():
-    lineas = ["🌐 <b>7 GRUPOS OFICIALES · RAÍZ</b>", ""]
-    for grupo in obtener_grupos_obligatorios_db():
-        lineas.append(f"{grupo['orden']}. <b>{html.escape(grupo['nombre'])}</b>")
-        lineas.append(f"   @{html.escape(grupo['username'])} · Helpdesk: @{html.escape(grupo['helpdesk_username'] or '—')}")
-    lineas += ["", "🔒 La identidad estructural de los 7 grupos se conserva protegida en esta versión."]
+    lineas = [
+        "🌐 <b>GRUPOS OFICIALES 7/7</b>",
+        "",
+        "Los 7 grupos forman la estructura protegida de Máximo Control.",
+        "Pulsa uno para consultar su ficha de raíz.",
+        "",
+    ]
+    for grupo in obtener_grupos_raiz_db():
+        lineas.append(
+            f"{grupo['orden']}. {'🟢' if grupo['activo'] else '🔴'} "
+            f"<b>{html.escape(grupo['nombre'])}</b>"
+        )
+    lineas += ["", "🔒 Alta/baja estructural protegida para evitar romper la regla 7/7."]
     return "\n".join(lineas)
+
+
+def teclado_grupos_raiz():
+    filas = []
+    for grupo in obtener_grupos_raiz_db():
+        marca = "🟢" if grupo["activo"] else "🔴"
+        filas.append([InlineKeyboardButton(
+            f"{marca} {grupo['orden']}. {grupo['nombre'][:28]}",
+            callback_data=f"orma_raiz_grupo:{grupo['username']}",
+        )])
+    filas.append([InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")])
+    return InlineKeyboardMarkup(filas)
+
+
+def texto_grupo_raiz(grupo):
+    return (
+        "🌐 <b>FICHA DE GRUPO · RAÍZ</b>\n\n"
+        f"Orden: <b>{grupo['orden']}</b>\n"
+        f"Nombre: <b>{html.escape(grupo['nombre'])}</b>\n"
+        f"Username: <b>@{html.escape(grupo['username'])}</b>\n"
+        f"Helpdesk: <b>@{html.escape(grupo['helpdesk_username'] or '—')}</b>\n"
+        f"Activo: <b>{'SÍ' if grupo['activo'] else 'NO'}</b>\n"
+        f"Obligatorio: <b>{'SÍ' if grupo['obligatorio'] else 'NO'}</b>\n\n"
+        "🔒 <b>IDENTIDAD ESTRUCTURAL PROTEGIDA</b>\n"
+        "Esta versión permite consultar la raíz sin exponer borrado, renombrado o sustitución accidental del grupo."
+    )
 
 
 def texto_bots_exentos_raiz():
-    lineas = ["🤖 <b>BOTS EXENTOS DE RAÍZ</b>", "", "Pulsa un bot para activar/desactivar su exención:"]
-    for fila in obtener_bots_exentos_raiz_db():
-        lineas.append(f"{'🟢' if fila['activo'] else '🔴'} @{html.escape(fila['username'])}")
-    return "\n".join(lineas)
+    personalizados = bots_exentos_personalizados_raiz()
+    return (
+        "🤖 <b>BOTS EXENTOS / AUTORIZADOS</b>\n\n"
+        f"🔒 Bots estructurales protegidos: <b>{len(BOTS_OFICIALES_EXENTOS)}</b>\n"
+        f"➕ Bots añadidos por panel: <b>{len(personalizados)}</b>\n\n"
+        "Los bots estructurales nunca pueden perder su exención desde Telegram. "
+        "Puedes agregar o retirar bots adicionales sin modificar el código raíz."
+    )
 
 
 def teclado_bots_exentos_raiz():
-    filas=[]
-    for fila in obtener_bots_exentos_raiz_db():
-        marca="🟢" if fila["activo"] else "🔴"
-        filas.append([InlineKeyboardButton(f"{marca} @{fila['username']}", callback_data=f"orma_raiz_bot:{fila['username']}")])
+    filas = [[InlineKeyboardButton("➕ AGREGAR BOT EXENTO", callback_data="orma_raiz_bot_agregar")]]
+    for username in sorted(BOTS_OFICIALES_EXENTOS):
+        filas.append([InlineKeyboardButton(f"🔒 @{username}", callback_data="orma_raiz_bot_protegido")])
+    personalizados = bots_exentos_personalizados_raiz()
+    if personalizados:
+        filas.append([InlineKeyboardButton("— AÑADIDOS DESDE PANEL —", callback_data="orma_raiz_nop")])
+        for fila in personalizados:
+            filas.append([InlineKeyboardButton(
+                f"🟢 @{fila['username']} · QUITAR",
+                callback_data=f"orma_raiz_bot_quitar:{fila['username']}",
+            )])
     filas.append([InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")])
-    filas.append([InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")])
     return InlineKeyboardMarkup(filas)
+
+
+def texto_tiempos_raiz():
+    memb = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
+    pub = obtener_config_raiz_entero("aviso_publicidad_segundos", AVISO_PUBLICIDAD_SEGUNDOS)
+    return (
+        "⏱ <b>TIEMPOS DE AVISO · RAÍZ</b>\n\n"
+        f"🛡 Aviso de membresía: <b>{memb} s</b>\n"
+        f"📢 Aviso publicitario: <b>{pub} s</b>\n\n"
+        "Estos tiempos controlan únicamente cuánto permanece visible el aviso temporal; "
+        "no cambian las reglas, cupos ni restricciones."
+    )
+
+
+def teclado_tiempos_raiz():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛡 AVISO MEMBRESÍA", callback_data="orma_raiz_tiempos_membresia")],
+        [InlineKeyboardButton("📢 AVISO PUBLICIDAD", callback_data="orma_raiz_tiempos_publicidad")],
+        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
+    ])
+
+
+def teclado_selector_tiempo_raiz(tipo):
+    opciones = [15, 30, 60, 120]
+    filas = [[InlineKeyboardButton(f"{seg} s", callback_data=f"orma_raiz_tiempo:{tipo}:{seg}") for seg in opciones[:2]],
+             [InlineKeyboardButton(f"{seg} s", callback_data=f"orma_raiz_tiempo:{tipo}:{seg}") for seg in opciones[2:]]]
+    filas.append([InlineKeyboardButton("⬅️ TIEMPOS DE AVISO", callback_data="orma_raiz_tiempos")])
+    return InlineKeyboardMarkup(filas)
+
+
+def texto_pruebas_raiz():
+    activo = config_raiz_activa("grupo_pruebas_activo")
+    return (
+        "🧪 <b>GRUPO DE PRUEBAS</b>\n\n"
+        f"Grupo: <b>@{GRUPO_PRUEBAS_USERNAME}</b>\n"
+        f"Estado: <b>{'🟢 BAJO CONTROL' if activo else '🔴 FUERA DE CONTROL'}</b>\n\n"
+        "Este interruptor solo afecta al grupo de pruebas. Los 7 grupos oficiales permanecen intactos."
+    )
+
+
+def teclado_pruebas_raiz():
+    activo = config_raiz_activa("grupo_pruebas_activo")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "🔴 SACAR DE CONTROL" if activo else "🟢 PONER BAJO CONTROL",
+            callback_data="orma_raiz_pruebas_toggle",
+        )],
+        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
+    ])
+
+
+def texto_auditoria_raiz():
+    grupos = obtener_grupos_raiz_db()
+    memb = config_raiz_activa("membresia_7de7_activa")
+    pruebas = config_raiz_activa("grupo_pruebas_activo")
+    personalizados = bots_exentos_personalizados_raiz()
+    lineas = [
+        "📊 <b>AUDITORÍA OPERATIVA DE RAÍZ</b>",
+        "",
+        f"🏷 Versión: <b>v{APP_VERSION} · {APP_VERSION_TITULO}</b>",
+        f"🛡 Membresía 7/7: <b>{'ACTIVA' if memb else 'PAUSADA'}</b>",
+        f"🌐 Grupos estructurales: <b>{len(grupos)}/7</b>",
+        f"🤖 Exentos estructurales: <b>{len(BOTS_OFICIALES_EXENTOS)}</b>",
+        f"➕ Exentos añadidos: <b>{len(personalizados)}</b>",
+        f"🧪 Grupo de pruebas: <b>{'BAJO CONTROL' if pruebas else 'FUERA DE CONTROL'}</b>",
+        f"⏱ Aviso membresía: <b>{obtener_config_raiz_entero('aviso_membresia_segundos', AVISO_MEMBRESIA_SEGUNDOS)} s</b>",
+        f"📢 Aviso publicidad: <b>{obtener_config_raiz_entero('aviso_publicidad_segundos', AVISO_PUBLICIDAD_SEGUNDOS)} s</b>",
+        "",
+        "🔒 CLIENTES EDITADOS y sus controles no son modificados por este centro.",
+    ]
+    return "\n".join(lineas)
 
 
 async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4786,6 +4984,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "orma_cerrar":
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
         ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+        ENTRADAS_RAIZ.pop(usuario.id, None)
         SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
         await query.answer()
         try:
@@ -4799,6 +4998,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "orma_menu_principal":
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
         ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+        ENTRADAS_RAIZ.pop(usuario.id, None)
         SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
         await query.answer()
         try:
@@ -4836,37 +5036,146 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "orma_raiz":
+        ENTRADAS_RAIZ.pop(usuario.id, None)
         await query.answer()
         await safe_query_edit_message(query, texto_centro_control_raiz(), parse_mode="HTML", reply_markup=teclado_centro_control_raiz())
         return
 
-    if data == "orma_raiz_toggle_membresia":
-        estado = alternar_config_raiz("membresia_7de7_activa")
-        await query.answer("Membresía 7/7 activada" if estado else "Membresía 7/7 pausada")
-        await safe_query_edit_message(query, texto_centro_control_raiz(), parse_mode="HTML", reply_markup=teclado_centro_control_raiz())
+    if data == "orma_raiz_membresia":
+        await query.answer()
+        await safe_query_edit_message(query, texto_membresia_raiz(), parse_mode="HTML", reply_markup=teclado_membresia_raiz())
         return
 
-    if data == "orma_raiz_toggle_pruebas":
-        estado = alternar_config_raiz("grupo_pruebas_activo")
-        await query.answer("Grupo de pruebas bajo control" if estado else "Grupo de pruebas fuera de control")
-        await safe_query_edit_message(query, texto_centro_control_raiz(), parse_mode="HTML", reply_markup=teclado_centro_control_raiz())
+    if data == "orma_raiz_membresia_toggle":
+        estado = alternar_config_raiz("membresia_7de7_activa")
+        await query.answer("Membresía 7/7 activada" if estado else "Membresía 7/7 pausada")
+        await safe_query_edit_message(query, texto_membresia_raiz(), parse_mode="HTML", reply_markup=teclado_membresia_raiz())
         return
 
     if data == "orma_raiz_grupos":
         await query.answer()
-        await safe_query_edit_message(query, texto_grupos_raiz(), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],[InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")]]))
+        await safe_query_edit_message(query, texto_grupos_raiz(), parse_mode="HTML", reply_markup=teclado_grupos_raiz())
+        return
+
+    if data.startswith("orma_raiz_grupo:"):
+        username_grupo = data.split(":", 1)[1]
+        grupo = obtener_grupo_raiz_db(username_grupo)
+        await query.answer()
+        if not grupo:
+            await safe_query_edit_message(query, "⚠️ Grupo de raíz no encontrado.", parse_mode="HTML", reply_markup=teclado_grupos_raiz())
+            return
+        await safe_query_edit_message(
+            query,
+            texto_grupo_raiz(grupo),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 7 GRUPOS OFICIALES", callback_data="orma_raiz_grupos")],
+                [InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")],
+            ]),
+        )
         return
 
     if data == "orma_raiz_bots":
+        ENTRADAS_RAIZ.pop(usuario.id, None)
         await query.answer()
         await safe_query_edit_message(query, texto_bots_exentos_raiz(), parse_mode="HTML", reply_markup=teclado_bots_exentos_raiz())
         return
 
-    if data.startswith("orma_raiz_bot:"):
-        username = data.split(":", 1)[1]
-        estado = alternar_bot_exento_raiz(username)
-        await query.answer(("Exento: @" if estado else "Controlado: @") + username)
+    if data == "orma_raiz_bot_protegido":
+        await query.answer("Bot estructural protegido: la exención no puede retirarse desde el panel", show_alert=True)
+        return
+
+    if data == "orma_raiz_bot_agregar":
+        ENTRADAS_RAIZ[usuario.id] = {"accion": "AGREGAR_BOT_EXENTO"}
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            "➕ <b>AGREGAR BOT EXENTO</b>\n\nEscribe el <b>@username</b> del bot que deseas autorizar.\n\nEl mensaje se eliminará automáticamente después de procesarlo.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ CANCELAR", callback_data="orma_raiz_bots")]]),
+        )
+        return
+
+    if data.startswith("orma_raiz_bot_quitar:"):
+        username_bot = data.split(":", 1)[1]
+        if username_bot in BOTS_OFICIALES_EXENTOS:
+            await query.answer("Bot estructural protegido", show_alert=True)
+            return
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            f"⚠️ <b>QUITAR EXENCIÓN</b>\n\n¿Retirar la exención de <b>@{html.escape(username_bot)}</b>?",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ SÍ, QUITAR", callback_data=f"orma_raiz_bot_quitar_ok:{username_bot}")],
+                [InlineKeyboardButton("❌ CANCELAR", callback_data="orma_raiz_bots")],
+            ]),
+        )
+        return
+
+    if data.startswith("orma_raiz_bot_quitar_ok:"):
+        username_bot = data.split(":", 1)[1]
+        quitado = quitar_bot_exento_raiz(username_bot)
+        await query.answer("Exención retirada" if quitado else "No se modificó el bot")
         await safe_query_edit_message(query, texto_bots_exentos_raiz(), parse_mode="HTML", reply_markup=teclado_bots_exentos_raiz())
+        return
+
+    if data == "orma_raiz_tiempos":
+        await query.answer()
+        await safe_query_edit_message(query, texto_tiempos_raiz(), parse_mode="HTML", reply_markup=teclado_tiempos_raiz())
+        return
+
+    if data == "orma_raiz_tiempos_membresia":
+        actual = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
+        await query.answer()
+        await safe_query_edit_message(query, f"🛡 <b>AVISO DE MEMBRESÍA</b>\n\nActual: <b>{actual} segundos</b>\nSelecciona el nuevo tiempo:", parse_mode="HTML", reply_markup=teclado_selector_tiempo_raiz("membresia"))
+        return
+
+    if data == "orma_raiz_tiempos_publicidad":
+        actual = obtener_config_raiz_entero("aviso_publicidad_segundos", AVISO_PUBLICIDAD_SEGUNDOS)
+        await query.answer()
+        await safe_query_edit_message(query, f"📢 <b>AVISO PUBLICITARIO</b>\n\nActual: <b>{actual} segundos</b>\nSelecciona el nuevo tiempo:", parse_mode="HTML", reply_markup=teclado_selector_tiempo_raiz("publicidad"))
+        return
+
+    if data.startswith("orma_raiz_tiempo:"):
+        try:
+            _, _, tipo_tiempo, segundos_txt = data.split(":", 3)
+            segundos = int(segundos_txt)
+        except (TypeError, ValueError):
+            await query.answer("Valor no válido", show_alert=True)
+            return
+        if segundos not in {15, 30, 60, 120}:
+            await query.answer("Tiempo no autorizado", show_alert=True)
+            return
+        clave = "aviso_membresia_segundos" if tipo_tiempo == "membresia" else "aviso_publicidad_segundos"
+        guardar_config_raiz(clave, segundos)
+        await query.answer(f"Tiempo actualizado: {segundos} s")
+        await safe_query_edit_message(query, texto_tiempos_raiz(), parse_mode="HTML", reply_markup=teclado_tiempos_raiz())
+        return
+
+    if data == "orma_raiz_pruebas":
+        await query.answer()
+        await safe_query_edit_message(query, texto_pruebas_raiz(), parse_mode="HTML", reply_markup=teclado_pruebas_raiz())
+        return
+
+    if data == "orma_raiz_pruebas_toggle":
+        estado = alternar_config_raiz("grupo_pruebas_activo")
+        await query.answer("Grupo de pruebas bajo control" if estado else "Grupo de pruebas fuera de control")
+        await safe_query_edit_message(query, texto_pruebas_raiz(), parse_mode="HTML", reply_markup=teclado_pruebas_raiz())
+        return
+
+    if data == "orma_raiz_auditoria":
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            texto_auditoria_raiz(),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")]]),
+        )
+        return
+
+    if data == "orma_raiz_nop":
+        await query.answer()
         return
 
     if data.startswith("orma_clientes_editados:"):
@@ -6793,6 +7102,31 @@ async def procesar_entrada_control_publicidad(
         or chat.type != ChatType.PRIVATE
     ):
         return
+
+    entrada_raiz = ENTRADAS_RAIZ.get(usuario.id)
+    if entrada_raiz:
+        try:
+            await mensaje.delete()
+        except TelegramError:
+            pass
+
+        if entrada_raiz.get("accion") == "AGREGAR_BOT_EXENTO":
+            username = str(mensaje.text or "").strip().lstrip("@").lower()
+            try:
+                agregado = agregar_bot_exento_raiz(username)
+            except ValueError:
+                return
+            ENTRADAS_RAIZ.pop(usuario.id, None)
+            try:
+                await context.bot.send_message(
+                    chat_id=usuario.id,
+                    text=f"✅ <b>@{html.escape(agregado)}</b> quedó exento de las restricciones de raíz.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🤖 VOLVER A BOTS EXENTOS", callback_data="orma_raiz_bots")]]),
+                )
+            except TelegramError:
+                pass
+            return
 
     entrada_total = ENTRADAS_ORMA_TOTAL.get(usuario.id)
     if entrada_total:

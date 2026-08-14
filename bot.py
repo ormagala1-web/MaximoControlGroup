@@ -4798,6 +4798,7 @@ def teclado_centro_control_raiz():
         [InlineKeyboardButton("🤖 BOTS EXENTOS / AUTORIZADOS", callback_data="orma_raiz_bots")],
         [InlineKeyboardButton("⏱ TIEMPOS DE AVISO", callback_data="orma_raiz_tiempos")],
         [InlineKeyboardButton("🧪 GRUPO DE PRUEBAS", callback_data="orma_raiz_pruebas")],
+        [InlineKeyboardButton("📜 REGLAS PROTEGIDAS DE RAÍZ", callback_data="orma_raiz_reglas_protegidas")],
         [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
         [
             InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
@@ -4951,6 +4952,42 @@ def teclado_pruebas_raiz():
     ])
 
 
+
+def texto_reglas_protegidas_raiz():
+    return (
+        "📜 <b>REGLAS PROTEGIDAS DE RAÍZ</b>\n\n"
+        "Estas reglas forman parte del comportamiento estructural de "
+        "<b>@MaximoControlGroup_bot</b>. Se muestran para auditoría, pero "
+        "no se pueden desactivar desde Telegram.\n\n"
+        "💬 <b>TEXTO NORMAL PURO: SIEMPRE LIBRE</b>\n"
+        "• Un mensaje de texto normal, sin enlace ni contenido publicitario "
+        "controlado, no entra al motor de restricción publicitaria.\n\n"
+        "🧮 <b>CONTADORES INDEPENDIENTES POR GRUPO</b>\n"
+        "• El consumo se calcula por identidad + grupo + período.\n"
+        "• Publicar en un grupo no consume el cupo de otro.\n\n"
+        "🕒 <b>CICLO DIARIO MÓVIL DE 24 HORAS</b>\n"
+        "• Cuando existe límite diario, su ciclo usa el ancla propia de la regla.\n\n"
+        "⌨️ <b>COMANDOS INTERNOS PROTEGIDOS</b>\n"
+        "• /orma, /start y /estado conservan su tratamiento especial.\n\n"
+        "🕶️ <b>ADMINISTRACIÓN ANÓNIMA AUTORIZADA</b>\n"
+        "• @GroupAnonymousBot conserva el acceso administrativo previsto.\n\n"
+        "🌐 <b>IDENTIDAD DE LOS 7 GRUPOS PROTEGIDA</b>\n"
+        "• El panel no permite borrar, renombrar ni sustituir accidentalmente "
+        "los grupos oficiales.\n\n"
+        "🤖 <b>BOTS ESTRUCTURALES PROTEGIDOS</b>\n"
+        "• Los bots oficiales de raíz no pueden perder su exención desde el panel.\n\n"
+        "🔒 Estas protecciones no modifican CLIENTES EDITADOS ni sus controles."
+    )
+
+
+def teclado_reglas_protegidas_raiz():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
+        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
+        [InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")],
+    ])
+
+
 def texto_auditoria_raiz():
     grupos = obtener_grupos_raiz_db()
     memb = config_raiz_activa("membresia_7de7_activa")
@@ -4967,6 +5004,9 @@ def texto_auditoria_raiz():
         f"🧪 Grupo de pruebas: <b>{'BAJO CONTROL' if pruebas else 'FUERA DE CONTROL'}</b>",
         f"⏱ Aviso membresía: <b>{obtener_config_raiz_entero('aviso_membresia_segundos', AVISO_MEMBRESIA_SEGUNDOS)} s</b>",
         f"📢 Aviso publicidad: <b>{obtener_config_raiz_entero('aviso_publicidad_segundos', AVISO_PUBLICIDAD_SEGUNDOS)} s</b>",
+        "💬 Texto normal puro: <b>SIEMPRE LIBRE · PROTEGIDO</b>",
+        "🧮 Contadores por grupo: <b>INDEPENDIENTES · PROTEGIDO</b>",
+        "🕒 Ciclo diario: <b>24 HORAS MÓVILES · PROTEGIDO</b>",
         "",
         "🔒 CLIENTES EDITADOS y sus controles no son modificados por este centro.",
     ]
@@ -5162,6 +5202,16 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         estado = alternar_config_raiz("grupo_pruebas_activo")
         await query.answer("Grupo de pruebas bajo control" if estado else "Grupo de pruebas fuera de control")
         await safe_query_edit_message(query, texto_pruebas_raiz(), parse_mode="HTML", reply_markup=teclado_pruebas_raiz())
+        return
+
+    if data == "orma_raiz_reglas_protegidas":
+        await query.answer()
+        await safe_query_edit_message(
+            query,
+            texto_reglas_protegidas_raiz(),
+            parse_mode="HTML",
+            reply_markup=teclado_reglas_protegidas_raiz(),
+        )
         return
 
     if data == "orma_raiz_auditoria":

@@ -2,7 +2,7 @@
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
   "version": "1.0.5",
-  "status": "CANDIDATE_LOCAL",
+  "status": "CANDIDATE_JUSTRUNMY",
   "base_backup": "R044",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
@@ -14,27 +14,66 @@
     "@BotRespaldosPremium_bot"
   ],
   "features": [
-    "Barrera anti-evasión para bots no autorizados",
-    "Compatibilidad con Telegram Guest Mode / Bot API 10.0",
-    "Detección de via_bot y bots externos",
-    "Prioridad correcta de sender_chat frente a GroupAnonymousBot ficticio",
-    "Excepciones oficiales y administrador anónimo del propio grupo preservados"
+    "Limitador por identidad + grupo + periodo",
+    "Aviso Membresía Publicitaria de 30 segundos",
+    "Botón hacia @MembresiaConsultasDenuncias_bot",
+    "Seguridad reforzada de /orma, /start y /estado"
   ],
-  "live_validation": "PENDING_TELEGRAM_TEST",
+  "live_validation": "PENDING_SPAMMER_RETEST",
   "base_version": "1.0.4",
-  "title": "PROTECCIÓN ANTI-EVASIÓN DE SPAM",
+  "title": "PROTECCIÓN ANTI-EVASIÓN DE SPAM EXTERNO",
   "changes": [
-    "Actualiza python-telegram-bot de 22.5 a 22.8",
-    "Solicita explícitamente actualizaciones guest_message",
-    "Elimina inmediatamente publicaciones de bots no autorizados antes de membresía/publicidad",
-    "Intenta banear como segunda barrera sin depender del estado de membresía del bot",
-    "Registra en logs caller_user/caller_chat de Guest Mode para identificar al invocador",
-    "Corrige la prioridad de sender_chat cuando Telegram entrega GroupAnonymousBot por compatibilidad",
-    "No modifica /orma, CLIENTES EDITADOS, límites, membresía 7/7 ni base de datos"
+    "@PublicidadContratada_bot incorporado y protegido como bot exento de raíz",
+    "CLIENTES EDITADOS permanece intacto e independiente",
+    "Centro de Control de Raíz reorganizado en módulos administrativos claros",
+    "Membresía 7/7 con pantalla propia y activación/pausa persistente",
+    "Los 7 grupos oficiales disponen de fichas directas de auditoría y permanecen estructuralmente protegidos",
+    "Bots exentos estructurales protegidos y posibilidad de agregar/quitar bots adicionales desde Telegram",
+    "Tiempos de avisos de membresía y publicidad editables con persistencia SQLite",
+    "Control independiente del grupo @Orma_Pruebas",
+    "Auditoría operativa de raíz visible desde el panel",
+    "No modifica el motor de CLIENTES EDITADOS ni sus controles existentes"
+  ],
+  "candidate_changes": [
+    "Versión v1.0.2 visible en Ficha Avanzada",
+    "Versión v1.0.2 visible en CLIENTES EDITADOS",
+    "Reloj de renovación/liberación de restricciones",
+    "Mantiene los 7 clientes recuperados en la base persistente",
+    "No modifica /orma ni la lógica de límites"
+  ],
+  "titulo": "Centro de Control de Raíz 7/7",
+  "base": "6139acd / v1.0.2",
+  "cambios": [
+    "Límite diario por ciclos móviles de 24 horas desde la configuración del límite",
+    "Ancla diaria independiente para controles globales y por grupo",
+    "Migración compatible con reglas existentes sin borrar clientes",
+    "Reloj /orma usa la misma ancla que el motor de control",
+    "Un fallo del reloj no impide abrir /orma"
   ],
   "scope": [
-    "Protección anti-evasión de spam únicamente",
-    "Sin cambios de esquema SQLite",
-    "Sin cambios funcionales en /orma ni CLIENTES EDITADOS"
+    "@PublicidadContratada_bot incorporado y protegido como bot exento de raíz",
+    "CLIENTES EDITADOS permanece intacto e independiente",
+    "Centro de Control de Raíz reorganizado en módulos administrativos claros",
+    "Membresía 7/7 con pantalla propia y activación/pausa persistente",
+    "Los 7 grupos oficiales disponen de fichas directas de auditoría y permanecen estructuralmente protegidos",
+    "Bots exentos estructurales protegidos y posibilidad de agregar/quitar bots adicionales desde Telegram",
+    "Tiempos de avisos de membresía y publicidad editables con persistencia SQLite",
+    "Control independiente del grupo @Orma_Pruebas",
+    "Auditoría operativa de raíz visible desde el panel",
+    "No modifica el motor de CLIENTES EDITADOS ni sus controles existentes",
+    "Agregar módulo visible de REGLAS PROTEGIDAS DE RAÍZ",
+    "Mostrar TEXTO NORMAL PURO: SIEMPRE LIBRE como regla estructural protegida",
+    "Mostrar contadores independientes por grupo, ciclo diario móvil 24h y comandos internos como reglas protegidas",
+    "Ampliar auditoría de raíz sin modificar el motor ni CLIENTES EDITADOS"
+  ],
+  "scope_v1_0_5": [
+    "Trabajar exclusivamente sobre R044 v1.0.4",
+    "Barrera temprana group=-10 antes de membresía y publicidad",
+    "Interceptar bot no exento que Telegram reporte fuera del grupo",
+    "Interceptar via_bot externo no autorizado",
+    "Interceptar guest_message y guest bot caller no autorizado con PTB 22.8",
+    "Eliminar primero el mensaje y usar ban de bot como segunda barrera cuando aplique",
+    "ApplicationHandlerStop evita que el evento genere aviso de membresía 0/7",
+    "No modificar /orma, CLIENTES EDITADOS, membresía 7/7, límites ni esquema SQLite"
   ]
 }

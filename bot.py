@@ -15,10 +15,10 @@ from telegram.ext import (
     CallbackQueryHandler,
     ChatMemberHandler,
     CommandHandler,
+    ApplicationHandlerStop,
     ContextTypes,
     MessageHandler,
     TypeHandler,
-    ApplicationHandlerStop,
     filters,
 )
 
@@ -170,8 +170,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.5"
-APP_VERSION_TITULO = "PROTECCIÓN ANTI-EVASIÓN DE SPAM"
+APP_VERSION = "1.0.4"
+APP_VERSION_TITULO = "CENTRO DE CONTROL DE RAÍZ 7/7"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -4781,7 +4781,7 @@ def texto_centro_control_raiz():
     personalizados = len(bots_exentos_personalizados_raiz())
     return (
         "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/7</b>\n"
-        "🏷 <b>v1.0.5 · PROTECCIÓN ANTI-EVASIÓN DE SPAM</b>\n\n"
+        "🏷 <b>v1.0.4 · PANEL EDITABLE SEGURO</b>\n\n"
         "Estado operativo de las reglas de raíz:\n\n"
         f"🛡 Membresía 7/7: <b>{membresia}</b>\n"
         f"🌐 Grupos oficiales estructurales: <b>{len(grupos)}/7</b>\n"
@@ -5045,7 +5045,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         try:
             await safe_query_edit_message(query,
-                "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n🏷 <b>v1.0.5 · PROTECCIÓN ANTI-EVASIÓN DE SPAM</b>\n\n"
+                "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n🏷 <b>v1.0.4 · CENTRO DE CONTROL DE RAÍZ 7/7</b>\n\n"
                 "Centro privado de administración.\n\n"
                 "📌 Responde cualquier mensaje en un grupo controlado "
                 "con <code>/orma</code> para abrir su expediente.\n\n"
@@ -6702,38 +6702,27 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-def _mensaje_real_update(update: Update):
-    """Incluye mensajes normales y Guest Mode (Bot API 10.0+)."""
-    return getattr(update, "guest_message", None) or update.effective_message
-
-
-def _es_anonimo_administrativo_del_mismo_grupo(mensaje, chat):
-    """Distingue al administrador anónimo real de un sender_chat externo."""
-    usuario = getattr(mensaje, "from_user", None)
-    sender_chat = getattr(mensaje, "sender_chat", None)
-    return bool(
-        usuario is not None
-        and int(getattr(usuario, "id", 0) or 0) == GROUP_ANONYMOUS_BOT_ID
-        and sender_chat is not None
-        and int(getattr(sender_chat, "id", 0) or 0) == int(chat.id)
-    )
-
-
 async def control_anti_evasion_spam(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
     """
-    Corta antes del resto de reglas publicaciones de bots no autorizados,
-    incluidos Guest Mode y resultados enviados vía bots externos.
-    """
-    mensaje = _mensaje_real_update(update)
-    if mensaje is None:
-        return
+    Barrera temprana anti-evasión.
 
-    chat = getattr(mensaje, "chat", None) or update.effective_chat
+    Se ejecuta antes de membresía/publicidad y corta únicamente vectores
+    de ejecución externa de bots no exentos:
+    - bot que aparece como remitente pero está fuera del grupo;
+    - mensajes enviados vía un bot externo (via_bot);
+    - guest_message / guest bot caller no autorizado (PTB 22.8+).
+
+    No altera /orma, CLIENTES EDITADOS, membresía 7/7 ni límites.
+    """
+    mensaje = update.effective_message
+    chat = update.effective_chat
+
     if (
-        chat is None
+        mensaje is None
+        or chat is None
         or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
         or not es_grupo_controlado(chat)
     ):
@@ -6741,89 +6730,104 @@ async def control_anti_evasion_spam(
 
     usuario = getattr(mensaje, "from_user", None)
     via_bot = getattr(mensaje, "via_bot", None)
-    guest_caller_user = getattr(mensaje, "guest_bot_caller_user", None)
-    guest_caller_chat = getattr(mensaje, "guest_bot_caller_chat", None)
-    guest_query_id = getattr(mensaje, "guest_query_id", None)
-    es_guest = bool(
-        getattr(update, "guest_message", None) is not None
-        or guest_caller_user is not None
-        or guest_caller_chat is not None
-        or guest_query_id is not None
-    )
+    guest_user = getattr(mensaje, "guest_bot_caller_user", None)
+    guest_chat = getattr(mensaje, "guest_bot_caller_chat", None)
+    es_guest_message = getattr(update, "guest_message", None) is not None
 
-    # La identidad técnica GroupAnonymousBot sigue protegida únicamente cuando
-    # representa de verdad a un administrador anónimo del mismo grupo.
-    if _es_anonimo_administrativo_del_mismo_grupo(mensaje, chat) and not es_guest:
+    # Nunca interceptar identidades estructurales/autorizadas.
+    if usuario is not None and es_bot_oficial_exento(usuario):
+        return
+    if via_bot is not None and es_bot_oficial_exento(via_bot):
+        return
+    if guest_user is not None and es_bot_oficial_exento(guest_user):
         return
 
-    bot_bloqueado = None
-    motivo = None
+    motivos = []
+    candidatos_ban = set()
 
-    if es_guest:
-        if usuario is not None and getattr(usuario, "is_bot", False):
-            if es_bot_oficial_exento(usuario):
-                return
-            bot_bloqueado = usuario
-        elif via_bot is not None and getattr(via_bot, "is_bot", False):
-            if es_bot_oficial_exento(via_bot):
-                return
-            bot_bloqueado = via_bot
-        motivo = "GUEST_MODE"
+    # Un bot visible como remitente solo se considera evasión temprana si
+    # Telegram confirma que no pertenece al grupo actual.
+    if usuario is not None and bool(getattr(usuario, "is_bot", False)):
+        try:
+            miembro = await context.bot.get_chat_member(chat.id, usuario.id)
+            estado = str(getattr(miembro, "status", "") or "").lower()
+            if estado in {"left", "kicked"}:
+                motivos.append("BOT_FUERA_DEL_GRUPO")
+                candidatos_ban.add(int(usuario.id))
+        except TelegramError as error:
+            # No se sanciona por un fallo transitorio de Telegram.
+            logging.warning(
+                "Anti-evasión: no se pudo verificar bot=%s chat=%s: %s",
+                getattr(usuario, "id", None),
+                chat.id,
+                error,
+            )
 
-    if motivo is None and via_bot is not None and getattr(via_bot, "is_bot", False):
-        if not es_bot_oficial_exento(via_bot):
-            bot_bloqueado = via_bot
-            motivo = "VIA_BOT_NO_AUTORIZADO"
+    # Los mensajes enviados a través de un bot externo no autorizado se
+    # eliminan antes de que puedan entrar a membresía/publicidad.
+    if via_bot is not None and bool(getattr(via_bot, "is_bot", False)):
+        motivos.append("VIA_BOT_EXTERNO")
+        candidatos_ban.add(int(via_bot.id))
 
-    if motivo is None and usuario is not None and getattr(usuario, "is_bot", False):
-        if not es_bot_oficial_exento(usuario):
-            bot_bloqueado = usuario
-            motivo = "BOT_NO_AUTORIZADO"
+    # Telegram/PTB 22.8 expone guest_message y los caller del bot invitado.
+    if es_guest_message:
+        motivos.append("GUEST_MESSAGE_EXTERNO")
 
-    if motivo is None:
+    if guest_user is not None:
+        motivos.append("GUEST_BOT_CALLER_USER")
+        if bool(getattr(guest_user, "is_bot", False)):
+            candidatos_ban.add(int(guest_user.id))
+
+    if guest_chat is not None:
+        motivos.append("GUEST_BOT_CALLER_CHAT")
+
+    if not motivos:
         return
 
     try:
-        await context.bot.delete_message(
-            chat_id=chat.id,
-            message_id=mensaje.message_id,
-        )
-    except TelegramError:
-        logging.exception(
-            "ANTI_EVASION no pudo eliminar mensaje chat=%s message=%s motivo=%s",
-            chat.id, mensaje.message_id, motivo,
+        await mensaje.delete()
+    except TelegramError as error:
+        logging.warning(
+            "Anti-evasión: no se pudo eliminar mensaje=%s chat=%s: %s",
+            getattr(mensaje, "message_id", None),
+            chat.id,
+            error,
         )
 
-    # El baneo queda como segunda barrera. La eliminación no depende de que
-    # Telegram considere al bot miembro del grupo.
-    if bot_bloqueado is not None:
+    # Segunda barrera: solo se intenta banear identidades bot no exentas.
+    for bot_id in sorted(candidatos_ban):
+        if bot_id <= 0 or bot_id == GROUP_ANONYMOUS_BOT_ID:
+            continue
         try:
             await context.bot.ban_chat_member(
                 chat_id=chat.id,
-                user_id=bot_bloqueado.id,
+                user_id=bot_id,
+                revoke_messages=True,
             )
         except TelegramError as error:
-            logging.warning(
-                "ANTI_EVASION baneo no aplicado chat=%s bot=%s: %s",
-                chat.id, bot_bloqueado.id, error,
+            logging.info(
+                "Anti-evasión: ban no aplicable bot=%s chat=%s: %s",
+                bot_id,
+                chat.id,
+                error,
             )
 
     logging.warning(
-        "ANTI_EVASION bloqueado motivo=%s chat=%s message=%s bot=%s "
-        "caller_user=%s caller_chat=%s via_bot=%s sender_chat=%s",
-        motivo,
+        "ANTI_EVASION_SPAM chat=%s message=%s from_user=%s via_bot=%s "
+        "guest_user=%s guest_chat=%s motivos=%s",
         chat.id,
-        mensaje.message_id,
-        getattr(bot_bloqueado, "id", None),
-        getattr(guest_caller_user, "id", None),
-        getattr(guest_caller_chat, "id", None),
+        getattr(mensaje, "message_id", None),
+        getattr(usuario, "id", None),
         getattr(via_bot, "id", None),
-        getattr(getattr(mensaje, "sender_chat", None), "id", None),
+        getattr(guest_user, "id", None),
+        getattr(guest_chat, "id", None),
+        ",".join(motivos),
     )
 
-    # Evita que membresía/publicidad generen avisos posteriores sobre un
-    # mensaje que ya fue cortado por la barrera anti-evasión.
+    # Impide que el mismo update continúe hacia membresía y genere el aviso 0/7.
     raise ApplicationHandlerStop
+
+
 
 
 async def control_publicidad_individual_grupos(
@@ -6844,22 +6848,7 @@ async def control_publicidad_individual_grupos(
     usuario = mensaje.from_user
     sender_chat = mensaje.sender_chat
 
-    # Telegram puede rellenar from_user con GroupAnonymousBot por compatibilidad
-    # cuando la identidad efectiva está en sender_chat. Solo se conserva la
-    # excepción cuando sender_chat es exactamente el mismo grupo (admin anónimo).
-    usar_sender_chat = bool(
-        sender_chat is not None
-        and not _es_anonimo_administrativo_del_mismo_grupo(mensaje, chat)
-    )
-
-    if usar_sender_chat:
-        identidad_tipo = "CANAL/CHAT"
-        identidad_id = sender_chat.id
-        username = sender_chat.username
-        nombre = sender_chat.title or "Sin nombre visible"
-        tipo_contenido = tipo_publicitario_mensaje(mensaje, None)
-
-    elif usuario is not None:
+    if usuario is not None:
         if es_bot_oficial_exento(usuario):
             return
 
@@ -6875,6 +6864,13 @@ async def control_publicidad_individual_grupos(
                 return
 
         tipo_contenido = tipo_publicitario_mensaje(mensaje, usuario)
+
+    elif sender_chat is not None:
+        identidad_tipo = "CANAL/CHAT"
+        identidad_id = sender_chat.id
+        username = sender_chat.username
+        nombre = sender_chat.title or "Sin nombre visible"
+        tipo_contenido = tipo_publicitario_mensaje(mensaje, None)
 
     else:
         return
@@ -7708,9 +7704,8 @@ async def iniciar_aplicacion(application: Application):
     if application.updater is None:
         raise RuntimeError("La aplicación no tiene Updater disponible.")
 
-    allowed_updates = list(dict.fromkeys([*Update.ALL_TYPES, "guest_message"]))
     await application.updater.start_polling(
-        allowed_updates=allowed_updates,
+        allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True,
     )
 

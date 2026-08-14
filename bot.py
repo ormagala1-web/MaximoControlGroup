@@ -6532,11 +6532,11 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         captura_id = int(data.split(":", 1)[1])
         await query.answer()
         await safe_query_edit_message(query,
-            "⚙️ <b>MODO DE CONTROL</b>\\n\\n"
-            "HEREDADO: usará la regla global cuando la activemos.\\n"
-            "PERSONALIZADO: aplica límites propios.\\n"
-            "ILIMITADO: registra pero no limita.\\n"
-            "BLOQUEADO: elimina toda publicidad controlable.\\n"
+            "⚙️ <b>MODO DE CONTROL</b>\n\n"
+            "HEREDADO: usará la regla global cuando la activemos.\n"
+            "PERSONALIZADO: aplica límites propios.\n"
+            "ILIMITADO: registra pero no limita.\n"
+            "BLOQUEADO: elimina toda publicidad controlable.\n"
             "EXCLUIDO: no aplica control publicitario.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -6589,7 +6589,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         captura_id = int(data.split(":", 1)[1])
         await query.answer()
         await safe_query_edit_message(query,
-            "⏱ <b>SEPARACIÓN ENTRE PUBLICIDADES</b>\\n\\n"
+            "⏱ <b>SEPARACIÓN ENTRE PUBLICIDADES</b>\n\n"
             "Selecciona el tiempo mínimo entre una publicidad permitida "
             "y la siguiente.",
             parse_mode="HTML",
@@ -6653,15 +6653,15 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
         await safe_query_edit_message(query,
-            "🔢 <b>LÍMITES DE PUBLICIDAD</b>\\n\\n"
-            f"Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b>\\n"
-            f"Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b>\\n"
-            f"Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b>\\n"
-            f"Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b>\\n"
-            f"Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b>\\n\\n"
-            "Pulsa un periodo y escribe el máximo.\\n"
-            "🔐 <b>0 = ninguna publicación</b> en ese período + acceso a Membresía Publicitaria.\\n"
-            "♾ <b>SIN LÍMITE</b> continúa siendo una condición distinta.\\n\\n"
+            "🔢 <b>LÍMITES DE PUBLICIDAD</b>\n\n"
+            f"Hora: <b>{texto_valor_limite(cfg['limite_hora'])}</b>\n"
+            f"Día: <b>{texto_valor_limite(cfg['limite_dia'])}</b>\n"
+            f"Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b>\n"
+            f"Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b>\n"
+            f"Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b>\n\n"
+            "Pulsa un periodo y escribe el máximo.\n"
+            "🔐 <b>0 = ninguna publicación</b> en ese período + acceso a Membresía Publicitaria.\n"
+            "♾ <b>SIN LÍMITE</b> continúa siendo una condición distinta.\n\n"
             "El número escrito se borrará automáticamente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -6887,13 +6887,13 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }.get(campo, "valor")
 
         await safe_query_edit_message(query,
-            "✍️ <b>VALOR PERSONALIZADO</b>\\n\\n"
-            f"Escribe ahora el <b>{etiqueta}</b>.\\n\\n"
-            "Envía un número entero igual o mayor que 0.\\n\\n"
+            "✍️ <b>VALOR PERSONALIZADO</b>\n\n"
+            f"Escribe ahora el <b>{etiqueta}</b>.\n\n"
+            "Envía un número entero igual o mayor que 0.\n\n"
             "• <b>0</b> = ninguna publicación permitida en ese período; "
-            "al intentar publicar se mostrará el acceso a Membresía Publicitaria.\\n"
-            "• <b>SIN LÍMITE</b> = se configura desde «QUITAR TODOS LOS LÍMITES».\\n"
-            "• <b>BLOQUEADO</b> = bloqueo administrativo total y es una condición distinta.\\n\\n"
+            "al intentar publicar se mostrará el acceso a Membresía Publicitaria.\n"
+            "• <b>SIN LÍMITE</b> = se configura desde «QUITAR TODOS LOS LÍMITES».\n"
+            "• <b>BLOQUEADO</b> = bloqueo administrativo total y es una condición distinta.\n\n"
             "Tu mensaje se eliminará automáticamente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -7722,9 +7722,9 @@ async def procesar_entrada_control_publicidad(
                     chat_id=usuario.id,
                     message_id=panel_id,
                     text=(
-                        "❌ <b>VALOR NO VÁLIDO</b>\\n\\n"
-                        "Escribe únicamente un número entero igual o mayor que 0.\\n"
-                        "El valor 0 significa ninguna publicación permitida en ese período.\\n"
+                        "❌ <b>VALOR NO VÁLIDO</b>\n\n"
+                        "Escribe únicamente un número entero igual o mayor que 0.\n"
+                        "El valor 0 significa ninguna publicación permitida en ese período.\n"
                         "El mensaje será eliminado automáticamente."
                     ),
                     parse_mode="HTML",

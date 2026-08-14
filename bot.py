@@ -132,6 +132,7 @@ BOTS_OFICIALES_EXENTOS = {
     "maximocontrolgroup_bot",
     "unionmembresia_bot",
     "publicidadcontrolstreaming_bot",
+    "publicidadcontratada_bot",
     "groupanonymousbot",
 }
 
@@ -537,7 +538,104 @@ def inicializar_base_datos():
                 ),
             )
 
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS configuracion_raiz (
+                clave TEXT PRIMARY KEY,
+                valor TEXT NOT NULL,
+                fecha_actualizacion TEXT NOT NULL
+            )
+            """
+        )
+        for clave, valor in (
+            ("membresia_7de7_activa", "1"),
+            ("grupo_pruebas_activo", "1"),
+        ):
+            conexion.execute(
+                "INSERT OR IGNORE INTO configuracion_raiz (clave, valor, fecha_actualizacion) VALUES (?, ?, ?)",
+                (clave, valor, ahora),
+            )
+
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bots_exentos_raiz (
+                username TEXT PRIMARY KEY,
+                activo INTEGER NOT NULL DEFAULT 1,
+                fecha_actualizacion TEXT NOT NULL
+            )
+            """
+        )
+        for username in sorted(BOTS_OFICIALES_EXENTOS):
+            conexion.execute(
+                "INSERT OR IGNORE INTO bots_exentos_raiz (username, activo, fecha_actualizacion) VALUES (?, 1, ?)",
+                (username, ahora),
+            )
+
         conexion.commit()
+
+
+def obtener_config_raiz(clave, predeterminado="1"):
+    try:
+        with conectar_db() as conexion:
+            fila = conexion.execute(
+                "SELECT valor FROM configuracion_raiz WHERE clave = ?", (clave,)
+            ).fetchone()
+        return str(fila["valor"] if fila else predeterminado)
+    except sqlite3.Error:
+        return str(predeterminado)
+
+
+def config_raiz_activa(clave, predeterminado=True):
+    return obtener_config_raiz(clave, "1" if predeterminado else "0") == "1"
+
+
+def alternar_config_raiz(clave):
+    nuevo = "0" if config_raiz_activa(clave) else "1"
+    with conectar_db() as conexion:
+        conexion.execute(
+            """INSERT INTO configuracion_raiz (clave, valor, fecha_actualizacion)
+               VALUES (?, ?, ?)
+               ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, fecha_actualizacion=excluded.fecha_actualizacion""",
+            (clave, nuevo, datetime.now(timezone.utc).isoformat()),
+        )
+        conexion.commit()
+    return nuevo == "1"
+
+
+def obtener_bots_exentos_raiz_db():
+    with conectar_db() as conexion:
+        return conexion.execute(
+            "SELECT username, activo FROM bots_exentos_raiz ORDER BY username"
+        ).fetchall()
+
+
+def bot_exento_raiz_activo(username):
+    clave = str(username or "").lstrip("@").lower()
+    try:
+        with conectar_db() as conexion:
+            fila = conexion.execute(
+                "SELECT activo FROM bots_exentos_raiz WHERE username = ?", (clave,)
+            ).fetchone()
+        if fila is not None:
+            return bool(fila["activo"])
+    except sqlite3.Error:
+        pass
+    return clave in BOTS_OFICIALES_EXENTOS
+
+
+def alternar_bot_exento_raiz(username):
+    clave = str(username or "").lstrip("@").lower()
+    actual = bot_exento_raiz_activo(clave)
+    nuevo = 0 if actual else 1
+    with conectar_db() as conexion:
+        conexion.execute(
+            """INSERT INTO bots_exentos_raiz (username, activo, fecha_actualizacion)
+               VALUES (?, ?, ?)
+               ON CONFLICT(username) DO UPDATE SET activo=excluded.activo, fecha_actualizacion=excluded.fecha_actualizacion""",
+            (clave, nuevo, datetime.now(timezone.utc).isoformat()),
+        )
+        conexion.commit()
+    return bool(nuevo)
 
 
 def registrar_usuario_membresia(user, union_bot_iniciado=False):
@@ -1029,7 +1127,7 @@ def es_bot_oficial_exento(user):
     if int(getattr(user, "id", 0) or 0) == GROUP_ANONYMOUS_BOT_ID:
         return True
 
-    return username_usuario(user) in BOTS_OFICIALES_EXENTOS
+    return bot_exento_raiz_activo(username_usuario(user))
 
 
 def es_administrador_maximo(user):
@@ -1124,7 +1222,7 @@ def usernames_grupos_oficiales():
 def es_grupo_controlado(chat):
     username = username_chat(chat)
     return (
-        username == GRUPO_PRUEBAS_USERNAME.lower()
+        (username == GRUPO_PRUEBAS_USERNAME.lower() and config_raiz_activa("grupo_pruebas_activo"))
         or username in usernames_grupos_oficiales()
     )
 
@@ -4622,6 +4720,61 @@ def texto_accion_moderacion(accion):
     }.get(accion, accion)
 
 
+def texto_centro_control_raiz():
+    grupos = obtener_grupos_obligatorios_db()
+    membresia = "ACTIVA" if config_raiz_activa("membresia_7de7_activa") else "PAUSADA"
+    pruebas = "ACTIVO" if config_raiz_activa("grupo_pruebas_activo") else "FUERA DE CONTROL"
+    exentos = sum(1 for fila in obtener_bots_exentos_raiz_db() if bool(fila["activo"]))
+    return (
+        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/7</b>\n\n"
+        f"🛡 Membresía obligatoria 7/7: <b>{membresia}</b>\n"
+        f"🌐 Grupos oficiales configurados: <b>{len(grupos)}/7</b>\n"
+        f"🧪 @{GRUPO_PRUEBAS_USERNAME}: <b>{pruebas}</b>\n"
+        f"🤖 Bots exentos activos: <b>{exentos}</b>\n\n"
+        "Este panel administra las mismas reglas operativas de la raíz. "
+        "CLIENTES EDITADOS permanece independiente e intacto."
+    )
+
+
+def teclado_centro_control_raiz():
+    marca_m = "🟢" if config_raiz_activa("membresia_7de7_activa") else "🔴"
+    marca_p = "🟢" if config_raiz_activa("grupo_pruebas_activo") else "🔴"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{marca_m} MEMBRESÍA 7/7", callback_data="orma_raiz_toggle_membresia")],
+        [InlineKeyboardButton("🌐 LOS 7 GRUPOS OFICIALES", callback_data="orma_raiz_grupos")],
+        [InlineKeyboardButton("🤖 BOTS EXENTOS", callback_data="orma_raiz_bots")],
+        [InlineKeyboardButton(f"{marca_p} GRUPO DE PRUEBAS", callback_data="orma_raiz_toggle_pruebas")],
+        [InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")],
+        [InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")],
+    ])
+
+
+def texto_grupos_raiz():
+    lineas = ["🌐 <b>7 GRUPOS OFICIALES · RAÍZ</b>", ""]
+    for grupo in obtener_grupos_obligatorios_db():
+        lineas.append(f"{grupo['orden']}. <b>{html.escape(grupo['nombre'])}</b>")
+        lineas.append(f"   @{html.escape(grupo['username'])} · Helpdesk: @{html.escape(grupo['helpdesk_username'] or '—')}")
+    lineas += ["", "🔒 La identidad estructural de los 7 grupos se conserva protegida en esta versión."]
+    return "\n".join(lineas)
+
+
+def texto_bots_exentos_raiz():
+    lineas = ["🤖 <b>BOTS EXENTOS DE RAÍZ</b>", "", "Pulsa un bot para activar/desactivar su exención:"]
+    for fila in obtener_bots_exentos_raiz_db():
+        lineas.append(f"{'🟢' if fila['activo'] else '🔴'} @{html.escape(fila['username'])}")
+    return "\n".join(lineas)
+
+
+def teclado_bots_exentos_raiz():
+    filas=[]
+    for fila in obtener_bots_exentos_raiz_db():
+        marca="🟢" if fila["activo"] else "🔴"
+        filas.append([InlineKeyboardButton(f"{marca} @{fila['username']}", callback_data=f"orma_raiz_bot:{fila['username']}")])
+    filas.append([InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")])
+    filas.append([InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")])
+    return InlineKeyboardMarkup(filas)
+
+
 async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     usuario = update.effective_user
@@ -4650,7 +4803,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         try:
             await safe_query_edit_message(query,
-                "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
+                "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n🏷 <b>v1.0.4 · CENTRO DE CONTROL DE RAÍZ 7/7</b>\n\n"
                 "Centro privado de administración.\n\n"
                 "📌 Responde cualquier mensaje en un grupo controlado "
                 "con <code>/orma</code> para abrir su expediente.\n\n"
@@ -4666,6 +4819,12 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ],
                     [
                         InlineKeyboardButton(
+                            "⚙️ CONTROL DE RAÍZ 7/7",
+                            callback_data="orma_raiz",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
                             "🗑 CERRAR",
                             callback_data="orma_cerrar",
                         )
@@ -4674,6 +4833,40 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except TelegramError:
             pass
+        return
+
+    if data == "orma_raiz":
+        await query.answer()
+        await safe_query_edit_message(query, texto_centro_control_raiz(), parse_mode="HTML", reply_markup=teclado_centro_control_raiz())
+        return
+
+    if data == "orma_raiz_toggle_membresia":
+        estado = alternar_config_raiz("membresia_7de7_activa")
+        await query.answer("Membresía 7/7 activada" if estado else "Membresía 7/7 pausada")
+        await safe_query_edit_message(query, texto_centro_control_raiz(), parse_mode="HTML", reply_markup=teclado_centro_control_raiz())
+        return
+
+    if data == "orma_raiz_toggle_pruebas":
+        estado = alternar_config_raiz("grupo_pruebas_activo")
+        await query.answer("Grupo de pruebas bajo control" if estado else "Grupo de pruebas fuera de control")
+        await safe_query_edit_message(query, texto_centro_control_raiz(), parse_mode="HTML", reply_markup=teclado_centro_control_raiz())
+        return
+
+    if data == "orma_raiz_grupos":
+        await query.answer()
+        await safe_query_edit_message(query, texto_grupos_raiz(), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],[InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")]]))
+        return
+
+    if data == "orma_raiz_bots":
+        await query.answer()
+        await safe_query_edit_message(query, texto_bots_exentos_raiz(), parse_mode="HTML", reply_markup=teclado_bots_exentos_raiz())
+        return
+
+    if data.startswith("orma_raiz_bot:"):
+        username = data.split(":", 1)[1]
+        estado = alternar_bot_exento_raiz(username)
+        await query.answer(("Exento: @" if estado else "Controlado: @") + username)
+        await safe_query_edit_message(query, texto_bots_exentos_raiz(), parse_mode="HTML", reply_markup=teclado_bots_exentos_raiz())
         return
 
     if data.startswith("orma_clientes_editados:"):
@@ -6175,10 +6368,11 @@ async def control_publicidad_individual_grupos(
         username = usuario.username
         nombre = nombre_visible_usuario(usuario)
 
-        # La membresía 7/7 sigue siendo la primera puerta.
-        estado = await obtener_estado_membresia_7de7(usuario.id)
-        if not estado["completo"]:
-            return
+        # La membresía 7/7 sigue siendo la primera puerta cuando está activa.
+        if config_raiz_activa("membresia_7de7_activa"):
+            estado = await obtener_estado_membresia_7de7(usuario.id)
+            if not estado["completo"]:
+                return
 
         tipo_contenido = tipo_publicitario_mensaje(mensaje, usuario)
 
@@ -6480,6 +6674,9 @@ async def control_membresia_grupos(
     # ÚNICA EXCEPCIÓN: bots oficiales definidos de raíz.
     # Todo lo demás (usuarios, administradores y bots externos) cumple 7/7.
     if es_bot_oficial_exento(usuario):
+        return
+
+    if not config_raiz_activa("membresia_7de7_activa"):
         return
 
     registrar_usuario_membresia(usuario)

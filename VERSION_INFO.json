@@ -1,9 +1,9 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "status": "CANDIDATE_JUSTRUNMY",
-  "base_backup": "R044",
+  "base_backup": "R048",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
@@ -19,9 +19,9 @@
     "Botón hacia @MembresiaConsultasDenuncias_bot",
     "Seguridad reforzada de /orma, /start y /estado"
   ],
-  "live_validation": "PENDING_SPAMMER_RETEST",
-  "base_version": "1.0.4",
-  "title": "PROTECCIÓN ANTI-EVASIÓN DE SPAM EXTERNO",
+  "live_validation": "PENDING_TELEGRAM_TEST",
+  "base_version": "1.0.5",
+  "title": "CONTROL INDIVIDUAL DE TEXTO PUBLICITARIO Y MEMBRESÍA",
   "changes": [
     "@PublicidadContratada_bot incorporado y protegido como bot exento de raíz",
     "CLIENTES EDITADOS permanece intacto e independiente",
@@ -75,5 +75,17 @@
     "Eliminar primero el mensaje y usar ban de bot como segunda barrera cuando aplique",
     "ApplicationHandlerStop evita que el evento genere aviso de membresía 0/7",
     "No modificar /orma, CLIENTES EDITADOS, membresía 7/7, límites ni esquema SQLite"
+  ],
+  "scope_v1_0_6": [
+    "Trabajar exclusivamente sobre R048 v1.0.5",
+    "Mantener TEXTO NORMAL PURO: SIEMPRE LIBRE como regla general de raíz",
+    "Agregar excepción individual controlar_texto_simple con valor por defecto 0",
+    "Agregar botón en CLIENTES EDITADOS > PUBLICIDAD > TIPOS",
+    "Confirmación antes de activar la restricción de texto simple",
+    "Al activarse, solo esa identidad tiene bloqueado el texto puro en grupos controlados",
+    "Eliminar el texto simple restringido y mostrar acceso a Membresía Publicitaria",
+    "Reutilizar @MembresiaConsultasDenuncias_bot?start=publicidad",
+    "No modificar límites, separación, /orma, anti-evasión, bots exentos ni reglas de los demás usuarios",
+    "Migración SQLite compatible y no destructiva"
   ]
 }

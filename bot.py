@@ -170,8 +170,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.4"
-APP_VERSION_TITULO = "CENTRO DE CONTROL DE RAÍZ 7/7"
+APP_VERSION = "1.0.6"
+APP_VERSION_TITULO = "CONTROL INDIVIDUAL DE TEXTO PUBLICITARIO"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -283,6 +283,7 @@ def inicializar_base_datos():
                 controlar_documento INTEGER NOT NULL DEFAULT 1,
                 controlar_enlace INTEGER NOT NULL DEFAULT 1,
                 controlar_custom_emoji INTEGER NOT NULL DEFAULT 1,
+                controlar_texto_simple INTEGER NOT NULL DEFAULT 0,
                 ancla_limite_dia TEXT,
                 fecha_actualizacion TEXT NOT NULL,
                 PRIMARY KEY (identidad_tipo, identidad_id)
@@ -317,6 +318,20 @@ def inicializar_base_datos():
             )
             """
         )
+
+        # v1.0.6: excepción individual para texto publicitario simple.
+        # Por defecto queda en 0 para preservar TEXTO NORMAL PURO: SIEMPRE LIBRE.
+        if not columna_existe(
+            conexion,
+            "control_publicidad_identidades",
+            "controlar_texto_simple",
+        ):
+            conexion.execute(
+                """
+                ALTER TABLE control_publicidad_identidades
+                ADD COLUMN controlar_texto_simple INTEGER NOT NULL DEFAULT 0
+                """
+            )
 
         # v1.0.3: ancla independiente para ciclos diarios móviles de 24 horas.
         for tabla in ("control_publicidad_identidades", "control_publicidad_grupos"):
@@ -1472,6 +1487,7 @@ def actualizar_control_identidad_db(
         "controlar_documento",
         "controlar_enlace",
         "controlar_custom_emoji",
+        "controlar_texto_simple",
     }
 
     datos = {
@@ -1554,7 +1570,7 @@ def contiene_custom_emoji(mensaje):
     return False
 
 
-def tipo_publicitario_mensaje(mensaje, usuario=None):
+def tipo_publicitario_mensaje(mensaje, usuario=None, controlar_texto_simple=False):
     # Bots externos: cualquier publicación se considera controlable.
     if usuario is not None and getattr(usuario, "is_bot", False):
         if es_bot_oficial_exento(usuario):
@@ -1576,7 +1592,13 @@ def tipo_publicitario_mensaje(mensaje, usuario=None):
     if contiene_custom_emoji(mensaje):
         return "CUSTOM EMOJI"
 
-    # Principio fundamental: texto puro normal siempre libre.
+    # Regla raíz: texto puro normal siempre libre.
+    # Excepción v1.0.6: una identidad concreta puede ser marcada por el
+    # administrador para exigir Membresía Publicitaria cuando use texto puro
+    # con fines publicitarios. El valor por defecto es False.
+    if tipo == "TEXTO" and bool(controlar_texto_simple):
+        return "TEXTO SIMPLE"
+
     return None
 
 
@@ -1588,6 +1610,7 @@ def tipo_habilitado_por_config(tipo, cfg):
         "DOCUMENTO": "controlar_documento",
         "TEXTO + ENLACE": "controlar_enlace",
         "CUSTOM EMOJI": "controlar_custom_emoji",
+        "TEXTO SIMPLE": "controlar_texto_simple",
     }
 
     # Para bots externos, cualquier formato no reconocido específicamente
@@ -2109,6 +2132,7 @@ def resumen_tipos_controlados(cfg):
         ("Documento", "controlar_documento"),
         ("Enlace", "controlar_enlace"),
         ("Custom emoji", "controlar_custom_emoji"),
+        ("Texto simple · membresía", "controlar_texto_simple"),
     ]
     activos = [nombre for nombre, campo in pares if bool(cfg[campo])]
     libres = [nombre for nombre, campo in pares if not bool(cfg[campo])]
@@ -2308,12 +2332,93 @@ async def texto_control_publicidad(captura):
         "🎛 <b>TIPOS</b>",
         f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>",
         f"• Libres: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>",
-        "• Texto normal puro: <b>SIEMPRE LIBRE</b>",
+        (
+            "• Texto normal puro: <b>RESTRINGIDO SOLO PARA ESTA IDENTIDAD · "
+            "MEMBRESÍA PUBLICITARIA</b>"
+            if bool(cfg["controlar_texto_simple"])
+            else "• Texto normal puro: <b>LIBRE POR REGLA DE RAÍZ</b>"
+        ),
         "",
         "Selecciona qué deseas modificar.",
     ])
 
     return "\n".join(lineas)
+
+def teclado_tipos_publicidad_identidad(captura_id, cfg):
+    def marca(campo):
+        return "✅" if bool(cfg[campo]) else "❌"
+
+    texto_estado = (
+        "🔒 TEXTO SIMPLE · MEMBRESÍA"
+        if bool(cfg["controlar_texto_simple"])
+        else "🔓 TEXTO SIMPLE · LIBRE"
+    )
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                f"{marca('controlar_foto')} FOTO",
+                callback_data=f"orma_pub_toggle:{captura_id}:controlar_foto",
+            ),
+            InlineKeyboardButton(
+                f"{marca('controlar_video')} VIDEO",
+                callback_data=f"orma_pub_toggle:{captura_id}:controlar_video",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                f"{marca('controlar_gif')} GIF",
+                callback_data=f"orma_pub_toggle:{captura_id}:controlar_gif",
+            ),
+            InlineKeyboardButton(
+                f"{marca('controlar_documento')} DOCUMENTO",
+                callback_data=f"orma_pub_toggle:{captura_id}:controlar_documento",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                f"{marca('controlar_enlace')} ENLACE",
+                callback_data=f"orma_pub_toggle:{captura_id}:controlar_enlace",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                f"{marca('controlar_custom_emoji')} PREMIUM EMOJI",
+                callback_data=f"orma_pub_toggle:{captura_id}:controlar_custom_emoji",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                texto_estado,
+                callback_data=f"orma_pub_texto_simple:{captura_id}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "⬅️ RETROCEDER",
+                callback_data=f"orma_publicidad:{captura_id}",
+            ),
+        ],
+    ])
+
+
+def texto_tipos_publicidad_identidad(cfg):
+    estado_texto = (
+        "🔒 <b>RESTRINGIDO INDIVIDUALMENTE</b> · solicita Membresía Publicitaria"
+        if bool(cfg["controlar_texto_simple"])
+        else "🔓 <b>LIBRE</b> · aplica la regla general de raíz"
+    )
+    return (
+        "🎛 <b>TIPOS CONTROLADOS</b>\n\n"
+        "✅ = entra al control de cupos/separación\n"
+        "❌ = queda libre para esta identidad\n\n"
+        f"💬 Texto simple: {estado_texto}\n\n"
+        "La restricción de texto simple es una <b>excepción individual</b>. "
+        "No modifica la regla general TEXTO NORMAL PURO: SIEMPRE LIBRE "
+        "para los demás usuarios."
+    )
+
+
 
 async def eliminar_aviso_publicidad_programado(
     bot,
@@ -2401,6 +2506,67 @@ async def mostrar_aviso_publicidad_temporal(
             aviso.message_id,
         )
     )
+
+
+async def mostrar_aviso_texto_simple_membresia_temporal(
+    context,
+    chat,
+    identidad_id,
+):
+    """
+    Aviso exclusivo de la excepción individual TEXTO SIMPLE.
+    No modifica el aviso normal de límites publicitarios.
+    """
+    clave = (chat.id, identidad_id)
+    anterior = AVISOS_PUBLICIDAD_ACTIVOS.get(clave)
+
+    if anterior:
+        try:
+            await context.bot.delete_message(
+                chat_id=chat.id,
+                message_id=anterior,
+            )
+        except TelegramError:
+            pass
+
+    teclado = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "📣 OBTENER MEMBRESÍA PUBLICITARIA",
+                url=MEMBRESIA_PUBLICIDAD_URL,
+            )
+        ]
+    ])
+
+    segundos = obtener_config_raiz_entero(
+        "aviso_publicidad_segundos",
+        AVISO_PUBLICIDAD_SEGUNDOS,
+    )
+    aviso = await context.bot.send_message(
+        chat_id=chat.id,
+        text=(
+            "📣 <b>MEMBRESÍA PUBLICITARIA REQUERIDA</b>\n\n"
+            "Tu cuenta tiene una restricción individual para publicar "
+            "promociones mediante <b>texto simple</b> en nuestros grupos.\n\n"
+            "Para utilizar este formato publicitario, revisa las opciones de "
+            "<b>Membresía Publicitaria</b> desde el botón inferior.\n\n"
+            f"⏳ <i>Este aviso se eliminará automáticamente en {segundos} segundos.</i>"
+        ),
+        parse_mode="HTML",
+        reply_markup=teclado,
+        disable_web_page_preview=True,
+    )
+
+    AVISOS_PUBLICIDAD_ACTIVOS[clave] = aviso.message_id
+    asyncio.create_task(
+        eliminar_aviso_publicidad_programado(
+            context.bot,
+            chat.id,
+            identidad_id,
+            aviso.message_id,
+        )
+    )
+
 
 
 def limites_periodos_actividad():
@@ -6536,32 +6702,98 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
 
-        def marca(campo):
-            return "✅" if bool(cfg[campo]) else "❌"
+        await safe_query_edit_message(
+            query,
+            texto_tipos_publicidad_identidad(cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_tipos_publicidad_identidad(captura_id, cfg),
+        )
+        return
 
-        await safe_query_edit_message(query,
-            "🎛 <b>TIPOS CONTROLADOS</b>\\n\\n"
-            "✅ = entra al control de cupos/separación\\n"
-            "❌ = queda libre para esta identidad\\n\\n"
-            "El texto normal puro siempre permanece libre.",
+    if data.startswith("orma_pub_texto_simple:"):
+        captura_id = int(data.split(":", 1)[1])
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+
+        cfg = obtener_control_identidad_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+        )
+        activo = bool(cfg["controlar_texto_simple"])
+        await query.answer()
+
+        if activo:
+            texto = (
+                "💬 <b>TEXTO SIMPLE · EXCEPCIÓN INDIVIDUAL</b>\n\n"
+                "Actualmente esta identidad tiene el texto simple "
+                "<b>RESTRINGIDO</b> y se le solicita Membresía Publicitaria.\n\n"
+                "¿Deseas devolver su texto simple al estado libre?"
+            )
+            boton = InlineKeyboardButton(
+                "🔓 SÍ, DEJAR TEXTO LIBRE",
+                callback_data=f"orma_pub_texto_apply:{captura_id}:0",
+            )
+        else:
+            texto = (
+                "💬 <b>TEXTO SIMPLE · EXCEPCIÓN INDIVIDUAL</b>\n\n"
+                "La regla general del bot mantiene el texto normal puro libre.\n\n"
+                "Si activas esta excepción, <b>solo esta identidad</b> tendrá "
+                "restringido el texto simple en los grupos controlados: sus "
+                "mensajes de texto puro serán eliminados y recibirá el acceso "
+                "a <b>Membresía Publicitaria</b>.\n\n"
+                "No afecta a ningún otro usuario ni modifica la raíz 7/7."
+            )
+            boton = InlineKeyboardButton(
+                "🔒 ACTIVAR Y EXIGIR MEMBRESÍA",
+                callback_data=f"orma_pub_texto_apply:{captura_id}:1",
+            )
+
+        await safe_query_edit_message(
+            query,
+            texto,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
+                [boton],
                 [
-                    InlineKeyboardButton(f"{marca('controlar_foto')} FOTO", callback_data=f"orma_pub_toggle:{captura_id}:controlar_foto"),
-                    InlineKeyboardButton(f"{marca('controlar_video')} VIDEO", callback_data=f"orma_pub_toggle:{captura_id}:controlar_video"),
+                    InlineKeyboardButton(
+                        "⬅️ CANCELAR",
+                        callback_data=f"orma_pub_tipos:{captura_id}",
+                    )
                 ],
-                [
-                    InlineKeyboardButton(f"{marca('controlar_gif')} GIF", callback_data=f"orma_pub_toggle:{captura_id}:controlar_gif"),
-                    InlineKeyboardButton(f"{marca('controlar_documento')} DOCUMENTO", callback_data=f"orma_pub_toggle:{captura_id}:controlar_documento"),
-                ],
-                [
-                    InlineKeyboardButton(f"{marca('controlar_enlace')} ENLACE", callback_data=f"orma_pub_toggle:{captura_id}:controlar_enlace"),
-                ],
-                [
-                    InlineKeyboardButton(f"{marca('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pub_toggle:{captura_id}:controlar_custom_emoji"),
-                ],
-                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
             ]),
+        )
+        return
+
+    if data.startswith("orma_pub_texto_apply:"):
+        _, captura_txt, valor_txt = data.split(":", 2)
+        captura_id = int(captura_txt)
+        captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            await query.answer("Ficha no disponible.", show_alert=True)
+            return
+
+        nuevo = 1 if valor_txt == "1" else 0
+        actualizar_control_identidad_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+            controlar_texto_simple=nuevo,
+        )
+        await query.answer(
+            "Texto simple restringido · Membresía requerida"
+            if nuevo
+            else "Texto simple libre"
+        )
+        cfg = obtener_control_identidad_db(
+            captura["objetivo_tipo"],
+            captura["objetivo_id"],
+        )
+        await safe_query_edit_message(
+            query,
+            texto_tipos_publicidad_identidad(cfg),
+            parse_mode="HTML",
+            reply_markup=teclado_tipos_publicidad_identidad(captura_id, cfg),
         )
         return
 
@@ -6591,32 +6823,11 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             captura["objetivo_id"],
         )
 
-        def marca(c):
-            return "✅" if bool(cfg[c]) else "❌"
-
-        await safe_query_edit_message(query,
-            "🎛 <b>TIPOS CONTROLADOS</b>\\n\\n"
-            "✅ = entra al control de cupos/separación\\n"
-            "❌ = queda libre para esta identidad\\n\\n"
-            "El texto normal puro siempre permanece libre.",
+        await safe_query_edit_message(
+            query,
+            texto_tipos_publicidad_identidad(cfg),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(f"{marca('controlar_foto')} FOTO", callback_data=f"orma_pub_toggle:{captura_id}:controlar_foto"),
-                    InlineKeyboardButton(f"{marca('controlar_video')} VIDEO", callback_data=f"orma_pub_toggle:{captura_id}:controlar_video"),
-                ],
-                [
-                    InlineKeyboardButton(f"{marca('controlar_gif')} GIF", callback_data=f"orma_pub_toggle:{captura_id}:controlar_gif"),
-                    InlineKeyboardButton(f"{marca('controlar_documento')} DOCUMENTO", callback_data=f"orma_pub_toggle:{captura_id}:controlar_documento"),
-                ],
-                [
-                    InlineKeyboardButton(f"{marca('controlar_enlace')} ENLACE", callback_data=f"orma_pub_toggle:{captura_id}:controlar_enlace"),
-                ],
-                [
-                    InlineKeyboardButton(f"{marca('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pub_toggle:{captura_id}:controlar_custom_emoji"),
-                ],
-                [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_publicidad:{captura_id}")],
-            ]),
+            reply_markup=teclado_tipos_publicidad_identidad(captura_id, cfg),
         )
         return
 
@@ -6863,7 +7074,17 @@ async def control_publicidad_individual_grupos(
             if not estado["completo"]:
                 return
 
-        tipo_contenido = tipo_publicitario_mensaje(mensaje, usuario)
+        cfg_identidad_texto = obtener_control_identidad_db(
+            identidad_tipo,
+            identidad_id,
+        )
+        tipo_contenido = tipo_publicitario_mensaje(
+            mensaje,
+            usuario,
+            controlar_texto_simple=bool(
+                cfg_identidad_texto["controlar_texto_simple"]
+            ),
+        )
 
     elif sender_chat is not None:
         identidad_tipo = "CANAL/CHAT"
@@ -6875,8 +7096,35 @@ async def control_publicidad_individual_grupos(
     else:
         return
 
-    # Texto puro no entra al motor.
+    # Texto puro no entra al motor salvo la excepción individual v1.0.6.
     if tipo_contenido is None:
+        return
+
+    if tipo_contenido == "TEXTO SIMPLE" and usuario is not None:
+        try:
+            await mensaje.delete()
+        except TelegramError:
+            logging.exception(
+                "No se pudo eliminar texto simple restringido identidad=%s chat=%s",
+                identidad_id,
+                chat.id,
+            )
+
+        motivo_texto = "EXCEPCIÓN INDIVIDUAL · MEMBRESÍA PUBLICITARIA REQUERIDA"
+        registrar_evento_publicidad_db(
+            identidad_tipo,
+            identidad_id,
+            chat,
+            mensaje.message_id,
+            tipo_contenido,
+            "BLOQUEADA",
+            motivo_texto,
+        )
+        await mostrar_aviso_texto_simple_membresia_temporal(
+            context=context,
+            chat=chat,
+            identidad_id=identidad_id,
+        )
         return
 
     permitido, motivo, cfg, disponible = evaluar_control_publicidad(

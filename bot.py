@@ -170,8 +170,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.6"
-APP_VERSION_TITULO = "CONTROL INDIVIDUAL DE TEXTO PUBLICITARIO"
+APP_VERSION = "1.0.7"
+APP_VERSION_TITULO = "LÍMITE CERO + MEMBRESÍA PUBLICITARIA"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -2099,13 +2099,25 @@ def evaluar_control_publicidad(
                 desde_periodo,
             )
 
+        if int(limite) == 0:
+            return (
+                False,
+                f"{alcance} · {etiqueta} = 0 · MEMBRESÍA PUBLICITARIA REQUERIDA",
+                cfg,
+                None,
+            )
+
         if usados >= int(limite):
             return False, f"{alcance} · {etiqueta}", cfg, None
 
     return True, f"{alcance} · DENTRO DE LOS LÍMITES", cfg, None
 
 def texto_valor_limite(valor):
-    return "SIN LÍMITE" if valor is None else str(valor)
+    if valor is None:
+        return "SIN LÍMITE"
+    if int(valor) == 0:
+        return "0 · SIN PUBLICACIONES"
+    return str(valor)
 
 
 def texto_separacion(segundos):
@@ -6647,7 +6659,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Semana: <b>{texto_valor_limite(cfg['limite_semana'])}</b>\\n"
             f"Mes: <b>{texto_valor_limite(cfg['limite_mes'])}</b>\\n"
             f"Año: <b>{texto_valor_limite(cfg['limite_anio'])}</b>\\n\\n"
-            "Pulsa un periodo y escribe el máximo. "
+            "Pulsa un periodo y escribe el máximo.\\n"
+            "🔐 <b>0 = ninguna publicación</b> en ese período + acceso a Membresía Publicitaria.\\n"
+            "♾ <b>SIN LÍMITE</b> continúa siendo una condición distinta.\\n\\n"
             "El número escrito se borrará automáticamente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -6875,7 +6889,11 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_query_edit_message(query,
             "✍️ <b>VALOR PERSONALIZADO</b>\\n\\n"
             f"Escribe ahora el <b>{etiqueta}</b>.\\n\\n"
-            "Envía un número entero igual o mayor que 0. "
+            "Envía un número entero igual o mayor que 0.\\n\\n"
+            "• <b>0</b> = ninguna publicación permitida en ese período; "
+            "al intentar publicar se mostrará el acceso a Membresía Publicitaria.\\n"
+            "• <b>SIN LÍMITE</b> = se configura desde «QUITAR TODOS LOS LÍMITES».\\n"
+            "• <b>BLOQUEADO</b> = bloqueo administrativo total y es una condición distinta.\\n\\n"
             "Tu mensaje se eliminará automáticamente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -7706,6 +7724,7 @@ async def procesar_entrada_control_publicidad(
                     text=(
                         "❌ <b>VALOR NO VÁLIDO</b>\\n\\n"
                         "Escribe únicamente un número entero igual o mayor que 0.\\n"
+                        "El valor 0 significa ninguna publicación permitida en ese período.\\n"
                         "El mensaje será eliminado automáticamente."
                     ),
                     parse_mode="HTML",

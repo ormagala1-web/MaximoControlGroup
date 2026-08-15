@@ -171,7 +171,7 @@ ENTRADAS_RAIZ = {}
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
 APP_VERSION = "1.0.7"
-APP_VERSION_TITULO = "LÍMITE CERO + MEMBRESÍA PUBLICITARIA"
+APP_VERSION_TITULO = "BARRERA LÍMITE CERO SIN BANEO"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -7059,6 +7059,115 @@ async def control_anti_evasion_spam(
 
 
 
+async def barrera_limite_cero_publicidad(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """Barrera temprana: límite 0 = ninguna publicidad autorizada.
+
+    Se ejecuta antes de Membresía 7/7. Solo elimina el intento publicitario,
+    muestra el aviso de Membresía Publicitaria y detiene el procesamiento del
+    evento. No banea, expulsa ni restringe al remitente.
+    """
+    mensaje = update.effective_message
+    chat = update.effective_chat
+    if (
+        not mensaje
+        or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not es_grupo_controlado(chat)
+    ):
+        return
+
+    usuario = mensaje.from_user
+    sender_chat = mensaje.sender_chat
+    if usuario is not None:
+        if es_bot_oficial_exento(usuario):
+            return
+        identidad_tipo = "BOT" if usuario.is_bot else "USUARIO"
+        identidad_id = usuario.id
+        username = usuario.username
+        nombre = nombre_visible_usuario(usuario)
+        cfg_texto = obtener_control_identidad_db(identidad_tipo, identidad_id)
+        tipo_contenido = tipo_publicitario_mensaje(
+            mensaje,
+            usuario,
+            controlar_texto_simple=bool(cfg_texto["controlar_texto_simple"]),
+        )
+    elif sender_chat is not None:
+        identidad_tipo = "CANAL/CHAT"
+        identidad_id = sender_chat.id
+        username = sender_chat.username
+        nombre = sender_chat.title or "Sin nombre visible"
+        tipo_contenido = tipo_publicitario_mensaje(mensaje, None)
+    else:
+        return
+
+    # Texto normal puro conserva su libertad salvo la regla individual
+    # controlar_texto_simple ya existente en v1.0.6.
+    if tipo_contenido is None or tipo_contenido == "TEXTO SIMPLE":
+        return
+
+    cfg, alcance = control_efectivo_para_chat(
+        identidad_tipo,
+        identidad_id,
+        chat,
+    )
+    modo = str(cfg["modo"] or "HEREDADO").upper()
+    if modo in {"EXCLUIDO", "ILIMITADO", "HEREDADO"}:
+        return
+    if not tipo_habilitado_por_config(tipo_contenido, cfg):
+        return
+
+    campos = (
+        ("limite_hora", "LÍMITE POR HORA"),
+        ("limite_dia", "LÍMITE DIARIO"),
+        ("limite_semana", "LÍMITE SEMANAL"),
+        ("limite_mes", "LÍMITE MENSUAL"),
+        ("limite_anio", "LÍMITE ANUAL"),
+    )
+    cero = next(
+        ((campo, etiqueta) for campo, etiqueta in campos
+         if cfg[campo] is not None and int(cfg[campo]) == 0),
+        None,
+    )
+    if cero is None:
+        return
+
+    _, etiqueta = cero
+    motivo = f"{alcance} · {etiqueta} = 0 · MEMBRESÍA PUBLICITARIA REQUERIDA"
+    try:
+        await mensaje.delete()
+    except TelegramError:
+        logging.exception(
+            "No se pudo eliminar publicidad con límite cero identidad=%s chat=%s",
+            identidad_id,
+            chat.id,
+        )
+
+    registrar_evento_publicidad_db(
+        identidad_tipo,
+        identidad_id,
+        chat,
+        mensaje.message_id,
+        tipo_contenido,
+        "BLOQUEADA",
+        motivo,
+    )
+    await mostrar_aviso_publicidad_temporal(
+        context=context,
+        chat=chat,
+        identidad_id=identidad_id,
+        nombre=nombre,
+        username=username,
+        tipo_identidad=identidad_tipo,
+        tipo_contenido=tipo_contenido,
+        motivo=motivo,
+        disponible=None,
+    )
+    raise ApplicationHandlerStop
+
+
 async def control_publicidad_individual_grupos(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -8006,6 +8115,13 @@ async def main():
     maximo_app.add_handler(
         TypeHandler(Update, control_anti_evasion_spam),
         group=-10,
+    )
+    maximo_app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & ~filters.COMMAND,
+            barrera_limite_cero_publicidad,
+        ),
+        group=-5,
     )
     maximo_app.add_handler(
         MessageHandler(

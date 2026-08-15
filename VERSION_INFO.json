@@ -1,9 +1,9 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.7",
-  "status": "CANDIDATE_JUSTRUNMY",
-  "base_backup": "R049",
+  "version": "1.0.8",
+  "status": "CANDIDATE_LOCAL",
+  "base_backup": "R053",
   "base_commit": "76e0c04227a5addf60f366bf2ede2125f07ca066",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
@@ -19,9 +19,9 @@
     "Botón hacia @MembresiaConsultasDenuncias_bot",
     "Seguridad reforzada de /orma, /start y /estado"
   ],
-  "live_validation": "PENDING_TELEGRAM_TEST",
-  "base_version": "1.0.6",
-  "title": "LÍMITE CERO CON ACCESO A MEMBRESÍA PUBLICITARIA",
+  "live_validation": "PENDING_JUSTRUNMY_TEST",
+  "base_version": "1.0.7",
+  "title": "BARRERA LÍMITE CERO SIN BANEO",
   "changes": [
     "@PublicidadContratada_bot incorporado y protegido como bot exento de raíz",
     "CLIENTES EDITADOS permanece intacto e independiente",
@@ -96,5 +96,14 @@
     "BLOQUEADO sigue siendo bloqueo administrativo total y distinto de límite 0",
     "Se conserva íntegra v1.0.6 Texto Simple individual",
     "No se modifica raíz 7/7, /orma, bots exentos, anti-evasión, separación ni esquema SQLite"
+  ],
+  "scope_v1_0_8": [
+    "Base exclusiva R053 v1.0.7",
+    "Barrera temprana para publicidad cuando cualquier límite efectivo es 0",
+    "Eliminar únicamente el intento publicitario y mostrar aviso de Membresía Publicitaria",
+    "No banear, expulsar ni restringir al usuario",
+    "ApplicationHandlerStop evita avisos duplicados del mismo evento",
+    "Texto normal puro permanece libre salvo excepción individual existente",
+    "No modificar /orma, bots exentos, anti-evasión, separación ni esquema SQLite"
   ]
 }

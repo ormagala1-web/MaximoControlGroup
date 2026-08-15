@@ -3,6 +3,8 @@ import asyncio
 import logging
 import sqlite3
 import html
+import hashlib
+import re
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
@@ -170,8 +172,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.7"
-APP_VERSION_TITULO = "BARRERA LÍMITE CERO SIN BANEO"
+APP_VERSION = "1.0.8"
+APP_VERSION_TITULO = "RAÍZ PUBLICITARIA REFORZADA + NAVEGACIÓN UNIFICADA"
+APP_VERSION_FECHA = "15/08/2026 13:38:24"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -209,8 +212,50 @@ def columna_existe(conexion, tabla, columna):
 def sello_version_panel():
     return (
         f"🏷 <b>v{APP_VERSION}</b> · "
-        f"{APP_VERSION_TITULO}"
+        f"{APP_VERSION_TITULO} · {APP_VERSION_FECHA}"
     )
+
+
+def texto_menu_principal_orma():
+    return (
+        "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n"
+        + sello_version_panel()
+        + "\n\nCentro privado de administración.\n\n"
+        "📌 Responde cualquier mensaje en un grupo controlado "
+        "con <code>/orma</code> para abrir su expediente.\n\n"
+        "🧹 Los comandos y datos operativos se eliminan automáticamente "
+        "para mantener el panel limpio."
+    )
+
+
+def teclado_menu_principal_orma():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "👥 CLIENTES EDITADOS",
+            callback_data="orma_clientes_editados:0",
+        )],
+        [InlineKeyboardButton(
+            "⚙️ CONTROL DE RAÍZ 7/7",
+            callback_data="orma_raiz",
+        )],
+        [InlineKeyboardButton(
+            "🗑 CERRAR",
+            callback_data="orma_cerrar",
+        )],
+    ])
+
+
+def teclado_navegacion_raiz(
+    volver_callback="orma_raiz",
+    volver_texto="⬅️ CONTROL DE RAÍZ",
+):
+    return [
+        [InlineKeyboardButton(volver_texto, callback_data=volver_callback)],
+        [
+            InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
+            InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
+        ],
+    ]
 
 
 def inicializar_base_datos():
@@ -320,7 +365,7 @@ def inicializar_base_datos():
         )
 
         # v1.0.6: excepción individual para texto publicitario simple.
-        # Por defecto queda en 0 para preservar TEXTO NORMAL PURO: SIEMPRE LIBRE.
+        # Por defecto queda en 0 para preservar TEXTO NORMAL PURO libre por regla general.
         if not columna_existe(
             conexion,
             "control_publicidad_identidades",
@@ -396,6 +441,37 @@ def inicializar_base_datos():
                 motivo TEXT,
                 fecha_evento TEXT NOT NULL
             )
+            """
+        )
+
+        if not columna_existe(conexion, "eventos_publicidad_control", "eliminacion_estado"):
+            conexion.execute(
+                "ALTER TABLE eventos_publicidad_control ADD COLUMN eliminacion_estado TEXT"
+            )
+
+        # v1.0.8: vigilancia persistente de texto normal puro largo.
+        # Primera huella (>50 caracteres visibles) queda en vigilancia; la segunda
+        # coincidencia de la misma identidad se clasifica como publicidad textual.
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vigilancia_texto_repetitivo (
+                identidad_tipo TEXT NOT NULL,
+                identidad_id INTEGER NOT NULL,
+                huella_sha256 TEXT NOT NULL,
+                texto_normalizado TEXT NOT NULL,
+                longitud_visible INTEGER NOT NULL,
+                primera_fecha TEXT NOT NULL,
+                ultima_fecha TEXT NOT NULL,
+                total_coincidencias INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (identidad_tipo, identidad_id, huella_sha256)
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_vigilancia_texto_identidad
+            ON vigilancia_texto_repetitivo (identidad_tipo, identidad_id)
             """
         )
 
@@ -1570,6 +1646,71 @@ def contiene_custom_emoji(mensaje):
     return False
 
 
+def texto_visible_puro(mensaje):
+    texto = getattr(mensaje, "text", None)
+    return str(texto or "")
+
+
+def normalizar_texto_vigilancia(texto):
+    # Normalización deliberadamente conservadora y auditable: Unicode visible
+    # intacto, espacios/saltos repetidos equivalentes y extremos eliminados.
+    return re.sub(r"\s+", " ", str(texto or "")).strip()
+
+
+def clasificar_texto_repetitivo_db(identidad_tipo, identidad_id, mensaje):
+    texto = texto_visible_puro(mensaje)
+    if not texto:
+        return None
+
+    # Regla de raíz: hasta 50 caracteres visibles permanece 100 % libre.
+    if len(texto) <= 50:
+        return None
+
+    normalizado = normalizar_texto_vigilancia(texto)
+    if len(normalizado) <= 50:
+        return None
+
+    huella = hashlib.sha256(normalizado.encode("utf-8")).hexdigest()
+    ahora = datetime.now(timezone.utc).isoformat()
+
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            """
+            SELECT total_coincidencias
+            FROM vigilancia_texto_repetitivo
+            WHERE identidad_tipo = ? AND identidad_id = ? AND huella_sha256 = ?
+            """,
+            (identidad_tipo, int(identidad_id), huella),
+        ).fetchone()
+
+        if fila is None:
+            conexion.execute(
+                """
+                INSERT INTO vigilancia_texto_repetitivo (
+                    identidad_tipo, identidad_id, huella_sha256, texto_normalizado,
+                    longitud_visible, primera_fecha, ultima_fecha, total_coincidencias
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    identidad_tipo, int(identidad_id), huella, normalizado,
+                    len(texto), ahora, ahora,
+                ),
+            )
+            conexion.commit()
+            return "VIGILANCIA_PRIMERA"
+
+        conexion.execute(
+            """
+            UPDATE vigilancia_texto_repetitivo
+            SET ultima_fecha = ?, total_coincidencias = total_coincidencias + 1
+            WHERE identidad_tipo = ? AND identidad_id = ? AND huella_sha256 = ?
+            """,
+            (ahora, identidad_tipo, int(identidad_id), huella),
+        )
+        conexion.commit()
+        return "PUBLICIDAD_TEXTUAL_REPETITIVA"
+
+
 def tipo_publicitario_mensaje(mensaje, usuario=None, controlar_texto_simple=False):
     # Bots externos: cualquier publicación se considera controlable.
     if usuario is not None and getattr(usuario, "is_bot", False):
@@ -1592,10 +1733,8 @@ def tipo_publicitario_mensaje(mensaje, usuario=None, controlar_texto_simple=Fals
     if contiene_custom_emoji(mensaje):
         return "CUSTOM EMOJI"
 
-    # Regla raíz: texto puro normal siempre libre.
-    # Excepción v1.0.6: una identidad concreta puede ser marcada por el
-    # administrador para exigir Membresía Publicitaria cuando use texto puro
-    # con fines publicitarios. El valor por defecto es False.
+    # Excepción manual v1.0.6: CONTROLAR TEXTO SIMPLE conserva prioridad.
+    # La regla automática de repetición se evalúa después, ya con identidad.
     if tipo == "TEXTO" and bool(controlar_texto_simple):
         return "TEXTO SIMPLE"
 
@@ -1611,6 +1750,7 @@ def tipo_habilitado_por_config(tipo, cfg):
         "TEXTO + ENLACE": "controlar_enlace",
         "CUSTOM EMOJI": "controlar_custom_emoji",
         "TEXTO SIMPLE": "controlar_texto_simple",
+        "PUBLICIDAD TEXTUAL REPETITIVA": None,
     }
 
     # Para bots externos, cualquier formato no reconocido específicamente
@@ -1630,6 +1770,7 @@ def registrar_evento_publicidad_db(
     tipo_contenido,
     decision,
     motivo=None,
+    eliminacion_estado=None,
 ):
     with conectar_db() as conexion:
         conexion.execute(
@@ -1644,9 +1785,10 @@ def registrar_evento_publicidad_db(
                 tipo_contenido,
                 decision,
                 motivo,
-                fecha_evento
+                fecha_evento,
+                eliminacion_estado
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 identidad_tipo,
@@ -1659,6 +1801,7 @@ def registrar_evento_publicidad_db(
                 decision,
                 motivo,
                 datetime.now(timezone.utc).isoformat(),
+                eliminacion_estado,
             ),
         )
         conexion.commit()
@@ -2116,7 +2259,7 @@ def texto_valor_limite(valor):
     if valor is None:
         return "SIN LÍMITE"
     if int(valor) == 0:
-        return "0 · SIN PUBLICACIONES"
+        return "0 · BLOQUEO ESTRICTO"
     return str(valor)
 
 
@@ -2426,7 +2569,7 @@ def texto_tipos_publicidad_identidad(cfg):
         "❌ = queda libre para esta identidad\n\n"
         f"💬 Texto simple: {estado_texto}\n\n"
         "La restricción de texto simple es una <b>excepción individual</b>. "
-        "No modifica la regla general TEXTO NORMAL PURO: SIEMPRE LIBRE "
+        "No modifica la regla general TEXTO NORMAL PURO: LIBRE POR DEFECTO "
         "para los demás usuarios."
     )
 
@@ -4848,7 +4991,7 @@ async def texto_control_publicidad_grupo(captura, grupo, cfg):
         "🎛 <b>TIPOS</b>",
         f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>",
         f"• Libres: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>",
-        "• Texto normal puro: <b>SIEMPRE LIBRE</b>",
+        "• Texto normal puro: <b>LIBRE POR REGLA GENERAL · EXCEPCIÓN INDIVIDUAL ANTI-EVASIÓN</b>",
         "",
         f"🕐 Actualizado: <b>{formatear_fecha_peru(cfg['fecha_actualizacion'])}</b>",
     ])
@@ -4959,7 +5102,8 @@ def texto_centro_control_raiz():
     personalizados = len(bots_exentos_personalizados_raiz())
     return (
         "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/7</b>\n"
-        "🏷 <b>v1.0.4 · PANEL EDITABLE SEGURO</b>\n\n"
+        + sello_version_panel()
+        + "\n\n"
         "Estado operativo de las reglas de raíz:\n\n"
         f"🛡 Membresía 7/7: <b>{membresia}</b>\n"
         f"🌐 Grupos oficiales estructurales: <b>{len(grupos)}/7</b>\n"
@@ -4991,7 +5135,9 @@ def texto_membresia_raiz():
     activa = config_raiz_activa("membresia_7de7_activa")
     aviso = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
     return (
-        "🛡 <b>MEMBRESÍA DE RAÍZ 7/7</b>\n\n"
+        "🛡 <b>MEMBRESÍA DE RAÍZ 7/7</b>\n"
+        + sello_version_panel()
+        + "\n\n"
         f"Estado: <b>{'🟢 ACTIVA' if activa else '🔴 PAUSADA'}</b>\n"
         "Regla estructural: <b>7 grupos oficiales obligatorios</b>\n"
         f"Aviso temporal: <b>{aviso} segundos</b>\n\n"
@@ -5009,13 +5155,14 @@ def teclado_membresia_raiz():
         )],
         [InlineKeyboardButton("🌐 VER LOS 7 GRUPOS", callback_data="orma_raiz_grupos")],
         [InlineKeyboardButton("⏱ CONFIGURAR AVISO", callback_data="orma_raiz_tiempos_membresia")],
-        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
+        *teclado_navegacion_raiz(),
     ])
 
 
 def texto_grupos_raiz():
     lineas = [
         "🌐 <b>GRUPOS OFICIALES 7/7</b>",
+        sello_version_panel(),
         "",
         "Los 7 grupos forman la estructura protegida de Máximo Control.",
         "Pulsa uno para consultar su ficha de raíz.",
@@ -5038,13 +5185,15 @@ def teclado_grupos_raiz():
             f"{marca} {grupo['orden']}. {grupo['nombre'][:28]}",
             callback_data=f"orma_raiz_grupo:{grupo['username']}",
         )])
-    filas.append([InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")])
+    filas.extend(teclado_navegacion_raiz())
     return InlineKeyboardMarkup(filas)
 
 
 def texto_grupo_raiz(grupo):
     return (
-        "🌐 <b>FICHA DE GRUPO · RAÍZ</b>\n\n"
+        "🌐 <b>FICHA DE GRUPO · RAÍZ</b>\n"
+        + sello_version_panel()
+        + "\n\n"
         f"Orden: <b>{grupo['orden']}</b>\n"
         f"Nombre: <b>{html.escape(grupo['nombre'])}</b>\n"
         f"Username: <b>@{html.escape(grupo['username'])}</b>\n"
@@ -5059,7 +5208,9 @@ def texto_grupo_raiz(grupo):
 def texto_bots_exentos_raiz():
     personalizados = bots_exentos_personalizados_raiz()
     return (
-        "🤖 <b>BOTS EXENTOS / AUTORIZADOS</b>\n\n"
+        "🤖 <b>BOTS EXENTOS / AUTORIZADOS</b>\n"
+        + sello_version_panel()
+        + "\n\n"
         f"🔒 Bots estructurales protegidos: <b>{len(BOTS_OFICIALES_EXENTOS)}</b>\n"
         f"➕ Bots añadidos por panel: <b>{len(personalizados)}</b>\n\n"
         "Los bots estructurales nunca pueden perder su exención desde Telegram. "
@@ -5079,7 +5230,7 @@ def teclado_bots_exentos_raiz():
                 f"🟢 @{fila['username']} · QUITAR",
                 callback_data=f"orma_raiz_bot_quitar:{fila['username']}",
             )])
-    filas.append([InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")])
+    filas.extend(teclado_navegacion_raiz())
     return InlineKeyboardMarkup(filas)
 
 
@@ -5087,7 +5238,9 @@ def texto_tiempos_raiz():
     memb = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
     pub = obtener_config_raiz_entero("aviso_publicidad_segundos", AVISO_PUBLICIDAD_SEGUNDOS)
     return (
-        "⏱ <b>TIEMPOS DE AVISO · RAÍZ</b>\n\n"
+        "⏱ <b>TIEMPOS DE AVISO · RAÍZ</b>\n"
+        + sello_version_panel()
+        + "\n\n"
         f"🛡 Aviso de membresía: <b>{memb} s</b>\n"
         f"📢 Aviso publicitario: <b>{pub} s</b>\n\n"
         "Estos tiempos controlan únicamente cuánto permanece visible el aviso temporal; "
@@ -5099,7 +5252,7 @@ def teclado_tiempos_raiz():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🛡 AVISO MEMBRESÍA", callback_data="orma_raiz_tiempos_membresia")],
         [InlineKeyboardButton("📢 AVISO PUBLICIDAD", callback_data="orma_raiz_tiempos_publicidad")],
-        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
+        *teclado_navegacion_raiz(),
     ])
 
 
@@ -5107,14 +5260,19 @@ def teclado_selector_tiempo_raiz(tipo):
     opciones = [15, 30, 60, 120]
     filas = [[InlineKeyboardButton(f"{seg} s", callback_data=f"orma_raiz_tiempo:{tipo}:{seg}") for seg in opciones[:2]],
              [InlineKeyboardButton(f"{seg} s", callback_data=f"orma_raiz_tiempo:{tipo}:{seg}") for seg in opciones[2:]]]
-    filas.append([InlineKeyboardButton("⬅️ TIEMPOS DE AVISO", callback_data="orma_raiz_tiempos")])
+    filas.extend(teclado_navegacion_raiz(
+        "orma_raiz_tiempos",
+        "⬅️ TIEMPOS DE AVISO",
+    ))
     return InlineKeyboardMarkup(filas)
 
 
 def texto_pruebas_raiz():
     activo = config_raiz_activa("grupo_pruebas_activo")
     return (
-        "🧪 <b>GRUPO DE PRUEBAS</b>\n\n"
+        "🧪 <b>GRUPO DE PRUEBAS</b>\n"
+        + sello_version_panel()
+        + "\n\n"
         f"Grupo: <b>@{GRUPO_PRUEBAS_USERNAME}</b>\n"
         f"Estado: <b>{'🟢 BAJO CONTROL' if activo else '🔴 FUERA DE CONTROL'}</b>\n\n"
         "Este interruptor solo afecta al grupo de pruebas. Los 7 grupos oficiales permanecen intactos."
@@ -5128,43 +5286,46 @@ def teclado_pruebas_raiz():
             "🔴 SACAR DE CONTROL" if activo else "🟢 PONER BAJO CONTROL",
             callback_data="orma_raiz_pruebas_toggle",
         )],
-        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
+        *teclado_navegacion_raiz(),
     ])
 
 
 
 def texto_reglas_protegidas_raiz():
     return (
-        "📜 <b>REGLAS PROTEGIDAS DE RAÍZ</b>\n\n"
-        "Estas reglas forman parte del comportamiento estructural de "
-        "<b>@MaximoControlGroup_bot</b>. Se muestran para auditoría, pero "
-        "no se pueden desactivar desde Telegram.\n\n"
-        "💬 <b>TEXTO NORMAL PURO: SIEMPRE LIBRE</b>\n"
-        "• Un mensaje de texto normal, sin enlace ni contenido publicitario "
-        "controlado, no entra al motor de restricción publicitaria.\n\n"
+        "📜 <b>REGLAS PROTEGIDAS DE RAÍZ</b>\n"
+        + sello_version_panel()
+        + "\n\n"
+        "📝 <b>TEXTO NORMAL PURO · LIBERTAD + VIGILANCIA</b>\n"
+        "• Hasta 50 caracteres visibles: <b>100 % LIBRE</b>; no consume cupo ni entra en vigilancia.\n"
+        "• Más de 50 caracteres, primera aparición: <b>LIBRE + EN VIGILANCIA</b>.\n"
+        "• La vigilancia queda persistida por identidad y no caduca por minutos, horas ni días.\n\n"
+        "🔁 <b>TEXTO REPETITIVO · PUBLICIDAD</b>\n"
+        "• Segunda coincidencia del mismo texto normalizado por la misma identidad: "
+        "<b>PUBLICIDAD TEXTUAL REPETITIVA</b>.\n"
+        "• La detección es global entre grupos; los cupos siguen siendo independientes por grupo.\n"
+        "• Espacios y saltos repetidos no permiten evadir la huella.\n\n"
+        "🛡 <b>CONTROLAR TEXTO SIMPLE · EXCEPCIÓN MANUAL</b>\n"
+        "• Se conserva en CLIENTES EDITADOS para identidades detectadas intentando evadir la membresía.\n\n"
+        "🚫 <b>PUBLICIDAD/DÍA = 0 · BLOQUEO ESTRICTO</b>\n"
+        "• Cero significa ninguna publicidad permitida cuando el contenido entra al motor.\n"
+        "• Se elimina únicamente la publicación; si el primer borrado falla, se intenta un segundo borrado directo.\n"
+        "• La auditoría diferencia eliminación confirmada de fallo de eliminación.\n\n"
+        "🎯 <b>SIN CASTIGO AL USUARIO</b>\n"
+        "• Estas reglas <b>NO</b> aplican ban, mute, expulsión ni restricción general.\n"
+        "• La finalidad es bloquear la publicidad no permitida y mostrar el acceso a Membresía Publicitaria.\n\n"
         "🧮 <b>CONTADORES INDEPENDIENTES POR GRUPO</b>\n"
-        "• El consumo se calcula por identidad + grupo + período.\n"
         "• Publicar en un grupo no consume el cupo de otro.\n\n"
         "🕒 <b>CICLO DIARIO MÓVIL DE 24 HORAS</b>\n"
-        "• Cuando existe límite diario, su ciclo usa el ancla propia de la regla.\n\n"
-        "⌨️ <b>COMANDOS INTERNOS PROTEGIDOS</b>\n"
-        "• /orma, /start y /estado conservan su tratamiento especial.\n\n"
-        "🕶️ <b>ADMINISTRACIÓN ANÓNIMA AUTORIZADA</b>\n"
-        "• @GroupAnonymousBot conserva el acceso administrativo previsto.\n\n"
-        "🌐 <b>IDENTIDAD DE LOS 7 GRUPOS PROTEGIDA</b>\n"
-        "• El panel no permite borrar, renombrar ni sustituir accidentalmente "
-        "los grupos oficiales.\n\n"
-        "🤖 <b>BOTS ESTRUCTURALES PROTEGIDOS</b>\n"
-        "• Los bots oficiales de raíz no pueden perder su exención desde el panel.\n\n"
-        "🔒 Estas protecciones no modifican CLIENTES EDITADOS ni sus controles."
+        "• El límite diario conserva su ancla propia.\n\n"
+        "🔒 Los 7 grupos oficiales, bots estructurales y controles existentes permanecen protegidos."
     )
 
 
 def teclado_reglas_protegidas_raiz():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
-        [InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")],
-        [InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")],
+        *teclado_navegacion_raiz(),
     ])
 
 
@@ -5184,7 +5345,9 @@ def texto_auditoria_raiz():
         f"🧪 Grupo de pruebas: <b>{'BAJO CONTROL' if pruebas else 'FUERA DE CONTROL'}</b>",
         f"⏱ Aviso membresía: <b>{obtener_config_raiz_entero('aviso_membresia_segundos', AVISO_MEMBRESIA_SEGUNDOS)} s</b>",
         f"📢 Aviso publicidad: <b>{obtener_config_raiz_entero('aviso_publicidad_segundos', AVISO_PUBLICIDAD_SEGUNDOS)} s</b>",
-        "💬 Texto normal puro: <b>SIEMPRE LIBRE · PROTEGIDO</b>",
+        "📝 Texto ≤50: <b>LIBRE</b> · texto >50 primera vez: <b>VIGILANCIA</b>",
+        "🔁 Segunda coincidencia: <b>PUBLICIDAD TEXTUAL · SIN CADUCIDAD</b>",
+        "🚫 Día=0: <b>BLOQUEO ESTRICTO DE PUBLICIDAD · SIN BAN/MUTE</b>",
         "🧮 Contadores por grupo: <b>INDEPENDIENTES · PROTEGIDO</b>",
         "🕒 Ciclo diario: <b>24 HORAS MÓVILES · PROTEGIDO</b>",
         "",
@@ -5222,34 +5385,11 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
         await query.answer()
         try:
-            await safe_query_edit_message(query,
-                "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n🏷 <b>v1.0.4 · CENTRO DE CONTROL DE RAÍZ 7/7</b>\n\n"
-                "Centro privado de administración.\n\n"
-                "📌 Responde cualquier mensaje en un grupo controlado "
-                "con <code>/orma</code> para abrir su expediente.\n\n"
-                "Los comandos y datos escritos se eliminan automáticamente "
-                "después de ser procesados.",
+            await safe_query_edit_message(
+                query,
+                texto_menu_principal_orma(),
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(
-                            "👥 CLIENTES EDITADOS",
-                            callback_data="orma_clientes_editados:0",
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            "⚙️ CONTROL DE RAÍZ 7/7",
-                            callback_data="orma_raiz",
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            "🗑 CERRAR",
-                            callback_data="orma_cerrar",
-                        )
-                    ],
-                ]),
+                reply_markup=teclado_menu_principal_orma(),
             )
         except TelegramError:
             pass
@@ -5288,10 +5428,12 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             texto_grupo_raiz(grupo),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ 7 GRUPOS OFICIALES", callback_data="orma_raiz_grupos")],
-                [InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal")],
-            ]),
+            reply_markup=InlineKeyboardMarkup(
+                teclado_navegacion_raiz(
+                    "orma_raiz_grupos",
+                    "⬅️ 7 GRUPOS OFICIALES",
+                )
+            ),
         )
         return
 
@@ -5348,13 +5490,27 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "orma_raiz_tiempos_membresia":
         actual = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
         await query.answer()
-        await safe_query_edit_message(query, f"🛡 <b>AVISO DE MEMBRESÍA</b>\n\nActual: <b>{actual} segundos</b>\nSelecciona el nuevo tiempo:", parse_mode="HTML", reply_markup=teclado_selector_tiempo_raiz("membresia"))
+        await safe_query_edit_message(
+            query,
+            "🛡 <b>AVISO DE MEMBRESÍA</b>\n"
+            + sello_version_panel()
+            + f"\n\nActual: <b>{actual} segundos</b>\nSelecciona el nuevo tiempo:",
+            parse_mode="HTML",
+            reply_markup=teclado_selector_tiempo_raiz("membresia"),
+        )
         return
 
     if data == "orma_raiz_tiempos_publicidad":
         actual = obtener_config_raiz_entero("aviso_publicidad_segundos", AVISO_PUBLICIDAD_SEGUNDOS)
         await query.answer()
-        await safe_query_edit_message(query, f"📢 <b>AVISO PUBLICITARIO</b>\n\nActual: <b>{actual} segundos</b>\nSelecciona el nuevo tiempo:", parse_mode="HTML", reply_markup=teclado_selector_tiempo_raiz("publicidad"))
+        await safe_query_edit_message(
+            query,
+            "📢 <b>AVISO PUBLICITARIO</b>\n"
+            + sello_version_panel()
+            + f"\n\nActual: <b>{actual} segundos</b>\nSelecciona el nuevo tiempo:",
+            parse_mode="HTML",
+            reply_markup=teclado_selector_tiempo_raiz("publicidad"),
+        )
         return
 
     if data.startswith("orma_raiz_tiempo:"):
@@ -5400,7 +5556,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             texto_auditoria_raiz(),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CONTROL DE RAÍZ", callback_data="orma_raiz")]]),
+            reply_markup=InlineKeyboardMarkup(teclado_navegacion_raiz()),
         )
         return
 
@@ -7059,113 +7215,26 @@ async def control_anti_evasion_spam(
 
 
 
-async def barrera_limite_cero_publicidad(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    """Barrera temprana: límite 0 = ninguna publicidad autorizada.
-
-    Se ejecuta antes de Membresía 7/7. Solo elimina el intento publicitario,
-    muestra el aviso de Membresía Publicitaria y detiene el procesamiento del
-    evento. No banea, expulsa ni restringe al remitente.
-    """
-    mensaje = update.effective_message
-    chat = update.effective_chat
-    if (
-        not mensaje
-        or not chat
-        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
-        or not es_grupo_controlado(chat)
-    ):
-        return
-
-    usuario = mensaje.from_user
-    sender_chat = mensaje.sender_chat
-    if usuario is not None:
-        if es_bot_oficial_exento(usuario):
-            return
-        identidad_tipo = "BOT" if usuario.is_bot else "USUARIO"
-        identidad_id = usuario.id
-        username = usuario.username
-        nombre = nombre_visible_usuario(usuario)
-        cfg_texto = obtener_control_identidad_db(identidad_tipo, identidad_id)
-        tipo_contenido = tipo_publicitario_mensaje(
-            mensaje,
-            usuario,
-            controlar_texto_simple=bool(cfg_texto["controlar_texto_simple"]),
-        )
-    elif sender_chat is not None:
-        identidad_tipo = "CANAL/CHAT"
-        identidad_id = sender_chat.id
-        username = sender_chat.username
-        nombre = sender_chat.title or "Sin nombre visible"
-        tipo_contenido = tipo_publicitario_mensaje(mensaje, None)
-    else:
-        return
-
-    # Texto normal puro conserva su libertad salvo la regla individual
-    # controlar_texto_simple ya existente en v1.0.6.
-    if tipo_contenido is None or tipo_contenido == "TEXTO SIMPLE":
-        return
-
-    cfg, alcance = control_efectivo_para_chat(
-        identidad_tipo,
-        identidad_id,
-        chat,
-    )
-    modo = str(cfg["modo"] or "HEREDADO").upper()
-    if modo in {"EXCLUIDO", "ILIMITADO", "HEREDADO"}:
-        return
-    if not tipo_habilitado_por_config(tipo_contenido, cfg):
-        return
-
-    campos = (
-        ("limite_hora", "LÍMITE POR HORA"),
-        ("limite_dia", "LÍMITE DIARIO"),
-        ("limite_semana", "LÍMITE SEMANAL"),
-        ("limite_mes", "LÍMITE MENSUAL"),
-        ("limite_anio", "LÍMITE ANUAL"),
-    )
-    cero = next(
-        ((campo, etiqueta) for campo, etiqueta in campos
-         if cfg[campo] is not None and int(cfg[campo]) == 0),
-        None,
-    )
-    if cero is None:
-        return
-
-    _, etiqueta = cero
-    motivo = f"{alcance} · {etiqueta} = 0 · MEMBRESÍA PUBLICITARIA REQUERIDA"
+async def eliminar_publicidad_estricta(context, mensaje, chat, identidad_id):
+    """Elimina solo la publicación; nunca banea, mutea ni restringe al usuario."""
     try:
         await mensaje.delete()
-    except TelegramError:
-        logging.exception(
-            "No se pudo eliminar publicidad con límite cero identidad=%s chat=%s",
-            identidad_id,
-            chat.id,
+        return True, "ELIMINADA_PRIMER_INTENTO"
+    except TelegramError as error_1:
+        logging.warning(
+            "Primer intento de eliminación falló identidad=%s chat=%s message=%s: %s",
+            identidad_id, chat.id, mensaje.message_id, error_1,
         )
 
-    registrar_evento_publicidad_db(
-        identidad_tipo,
-        identidad_id,
-        chat,
-        mensaje.message_id,
-        tipo_contenido,
-        "BLOQUEADA",
-        motivo,
-    )
-    await mostrar_aviso_publicidad_temporal(
-        context=context,
-        chat=chat,
-        identidad_id=identidad_id,
-        nombre=nombre,
-        username=username,
-        tipo_identidad=identidad_tipo,
-        tipo_contenido=tipo_contenido,
-        motivo=motivo,
-        disponible=None,
-    )
-    raise ApplicationHandlerStop
+    try:
+        await context.bot.delete_message(chat_id=chat.id, message_id=mensaje.message_id)
+        return True, "ELIMINADA_SEGUNDO_INTENTO"
+    except TelegramError as error_2:
+        logging.exception(
+            "BLOQUEO FALLIDO identidad=%s chat=%s message=%s",
+            identidad_id, chat.id, mensaje.message_id,
+        )
+        return False, f"FALLO_ELIMINACION: {error_2}"
 
 
 async def control_publicidad_individual_grupos(
@@ -7223,19 +7292,25 @@ async def control_publicidad_individual_grupos(
     else:
         return
 
-    # Texto puro no entra al motor salvo la excepción individual v1.0.6.
+    # Regla v1.0.8: texto puro <=50 siempre libre. Texto puro >50 se guarda
+    # en vigilancia la primera vez; desde la segunda coincidencia de la misma
+    # identidad, sin caducidad temporal, entra al motor como publicidad textual.
+    if tipo_contenido is None and clasificar_contenido_mensaje(mensaje) == "TEXTO":
+        estado_texto = clasificar_texto_repetitivo_db(
+            identidad_tipo, identidad_id, mensaje
+        )
+        if estado_texto == "PUBLICIDAD_TEXTUAL_REPETITIVA":
+            tipo_contenido = "PUBLICIDAD TEXTUAL REPETITIVA"
+        else:
+            return
+
     if tipo_contenido is None:
         return
 
     if tipo_contenido == "TEXTO SIMPLE" and usuario is not None:
-        try:
-            await mensaje.delete()
-        except TelegramError:
-            logging.exception(
-                "No se pudo eliminar texto simple restringido identidad=%s chat=%s",
-                identidad_id,
-                chat.id,
-            )
+        eliminado, estado_eliminacion = await eliminar_publicidad_estricta(
+            context, mensaje, chat, identidad_id
+        )
 
         motivo_texto = "EXCEPCIÓN INDIVIDUAL · MEMBRESÍA PUBLICITARIA REQUERIDA"
         registrar_evento_publicidad_db(
@@ -7246,6 +7321,7 @@ async def control_publicidad_individual_grupos(
             tipo_contenido,
             "BLOQUEADA",
             motivo_texto,
+            eliminacion_estado=estado_eliminacion,
         )
         await mostrar_aviso_texto_simple_membresia_temporal(
             context=context,
@@ -7273,14 +7349,9 @@ async def control_publicidad_individual_grupos(
         )
         return
 
-    try:
-        await mensaje.delete()
-    except TelegramError:
-        logging.exception(
-            "No se pudo eliminar publicidad bloqueada identidad=%s chat=%s",
-            identidad_id,
-            chat.id,
-        )
+    eliminado, estado_eliminacion = await eliminar_publicidad_estricta(
+        context, mensaje, chat, identidad_id
+    )
 
     registrar_evento_publicidad_db(
         identidad_tipo,
@@ -7290,6 +7361,7 @@ async def control_publicidad_individual_grupos(
         tipo_contenido,
         "BLOQUEADA",
         motivo,
+        eliminacion_estado=estado_eliminacion,
     )
 
     await mostrar_aviso_publicidad_temporal(
@@ -7416,17 +7488,14 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     registrar_usuario_membresia(usuario)
 
-    texto = (
-        "🦍 <b>MÁXIMO CONTROL TOTAL</b>\n\n"
-        "Centro privado de administración.\n\n"
-        "📌 Responde cualquier mensaje en cualquiera de los grupos "
-        "controlados con <code>/orma</code> para abrir su expediente.\n\n"
-        "🧹 Los comandos y datos operativos se eliminan "
-        "automáticamente para mantener el panel limpio."
-    )
-    teclado = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar")
-    ]])
+    # /start y MENÚ PRINCIPAL comparten exactamente la misma pantalla.
+    ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
+    ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+    ENTRADAS_RAIZ.pop(usuario.id, None)
+    SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
+
+    texto = texto_menu_principal_orma()
+    teclado = teclado_menu_principal_orma()
 
     panel_id = PANELES_ORMA.get(usuario.id) or obtener_panel_orma_db(usuario.id)
     if panel_id:
@@ -8115,13 +8184,6 @@ async def main():
     maximo_app.add_handler(
         TypeHandler(Update, control_anti_evasion_spam),
         group=-10,
-    )
-    maximo_app.add_handler(
-        MessageHandler(
-            filters.ChatType.GROUPS & ~filters.COMMAND,
-            barrera_limite_cero_publicidad,
-        ),
-        group=-5,
     )
     maximo_app.add_handler(
         MessageHandler(

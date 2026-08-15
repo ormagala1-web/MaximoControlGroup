@@ -5359,7 +5359,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("orma_raiz_tiempo:"):
         try:
-            _, _, tipo_tiempo, segundos_txt = data.split(":", 3)
+            _, tipo_tiempo, segundos_txt = data.split(":", 2)
             segundos = int(segundos_txt)
         except (TypeError, ValueError):
             await query.answer("Valor no válido", show_alert=True)

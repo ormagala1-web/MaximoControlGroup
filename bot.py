@@ -310,6 +310,38 @@ def inicializar_base_datos():
             """
         )
 
+        # v1.0.9: auditoría persistente de la puerta raíz de membresía 7/7.
+        # Registra el resultado real de la eliminación para poder distinguir
+        # un bloqueo confirmado de un fallo de Telegram sin alterar otras reglas.
+        conexion.execute(
+            """
+            CREATE TABLE IF NOT EXISTS eventos_membresia_7de7 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                nombre TEXT,
+                chat_id INTEGER NOT NULL,
+                chat_username TEXT,
+                chat_nombre TEXT,
+                message_id INTEGER NOT NULL,
+                grupos_actuales INTEGER NOT NULL DEFAULT 0,
+                grupos_requeridos INTEGER NOT NULL DEFAULT 7,
+                decision TEXT NOT NULL,
+                eliminacion_estado TEXT NOT NULL,
+                error TEXT,
+                fecha_evento TEXT NOT NULL,
+                UNIQUE(chat_id, message_id, user_id)
+            )
+            """
+        )
+
+        conexion.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_eventos_membresia_7de7_usuario_fecha
+            ON eventos_membresia_7de7 (user_id, fecha_evento)
+            """
+        )
+
         conexion.execute(
             """
             CREATE TABLE IF NOT EXISTS control_publicidad_identidades (
@@ -832,6 +864,95 @@ def registrar_usuario_membresia(user, union_bot_iniciado=False):
             )
 
         conexion.commit()
+
+
+def registrar_evento_membresia_7de7_db(
+    usuario,
+    chat,
+    message_id,
+    estado,
+    eliminacion_estado,
+    error=None,
+):
+    """Audita únicamente bloqueos de la puerta raíz 7/7."""
+    ahora = datetime.now(timezone.utc).isoformat()
+    nombre = " ".join(
+        parte for parte in [usuario.first_name, usuario.last_name] if parte
+    ).strip()
+    actuales = len(estado.get("completados", []))
+    requeridos = int(estado.get("total") or TOTAL_GRUPOS_OBLIGATORIOS)
+
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            INSERT INTO eventos_membresia_7de7 (
+                user_id, username, nombre,
+                chat_id, chat_username, chat_nombre, message_id,
+                grupos_actuales, grupos_requeridos, decision,
+                eliminacion_estado, error, fecha_evento
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chat_id, message_id, user_id) DO UPDATE SET
+                grupos_actuales = excluded.grupos_actuales,
+                grupos_requeridos = excluded.grupos_requeridos,
+                decision = excluded.decision,
+                eliminacion_estado = excluded.eliminacion_estado,
+                error = excluded.error,
+                fecha_evento = excluded.fecha_evento
+            """,
+            (
+                usuario.id,
+                usuario.username,
+                nombre,
+                chat.id,
+                getattr(chat, "username", None),
+                getattr(chat, "title", None),
+                message_id,
+                actuales,
+                requeridos,
+                "BLOQUEADA_7DE7",
+                eliminacion_estado,
+                str(error) if error else None,
+                ahora,
+            ),
+        )
+        conexion.commit()
+
+
+async def eliminar_mensaje_membresia_7de7_estricto(
+    context,
+    mensaje,
+    chat,
+    usuario_id,
+):
+    """Doble intento de eliminación exclusivo para la puerta raíz 7/7."""
+    try:
+        await mensaje.delete()
+        return True, "ELIMINADA_PRIMER_INTENTO", None
+    except TelegramError as error_1:
+        logging.warning(
+            "7/7 primer intento de eliminación falló user=%s chat=%s message=%s: %s",
+            usuario_id,
+            chat.id,
+            mensaje.message_id,
+            error_1,
+        )
+
+    try:
+        await context.bot.delete_message(
+            chat_id=chat.id,
+            message_id=mensaje.message_id,
+        )
+        return True, "ELIMINADA_SEGUNDO_INTENTO", str(error_1)
+    except TelegramError as error_2:
+        logging.exception(
+            "7/7 BLOQUEO FALLIDO user=%s chat=%s message=%s",
+            usuario_id,
+            chat.id,
+            mensaje.message_id,
+        )
+        detalle = f"primer_intento={error_1}; segundo_intento={error_2}"
+        return False, "FALLO_ELIMINACION", detalle
 
 
 def guardar_origen_union_db(user_id, chat_id, username=None, nombre=None):
@@ -7619,13 +7740,33 @@ async def control_membresia_grupos(
     if estado["completo"]:
         return
 
+    eliminado, estado_eliminacion, error_eliminacion = (
+        await eliminar_mensaje_membresia_7de7_estricto(
+            context=context,
+            mensaje=mensaje,
+            chat=chat,
+            usuario_id=usuario.id,
+        )
+    )
+
     try:
-        await mensaje.delete()
-    except TelegramError:
+        registrar_evento_membresia_7de7_db(
+            usuario=usuario,
+            chat=chat,
+            message_id=mensaje.message_id,
+            estado=estado,
+            eliminacion_estado=estado_eliminacion,
+            error=error_eliminacion,
+        )
+    except Exception:
+        # La auditoría nunca debe impedir que la barrera 7/7 continúe
+        # mostrando su aviso y deteniendo el update ya bloqueado.
         logging.exception(
-            "No se pudo eliminar mensaje de user=%s en @%s",
+            "7/7 no pudo persistir auditoría user=%s chat=%s message=%s estado=%s",
             usuario.id,
-            GRUPO_PRUEBAS_USERNAME,
+            chat.id,
+            mensaje.message_id,
+            estado_eliminacion,
         )
 
     usuario_db = obtener_usuario_membresia_db(usuario.id)
@@ -7644,6 +7785,10 @@ async def control_membresia_grupos(
         usuario=usuario,
         estado=estado,
     )
+
+    # La puerta 7/7 es terminal para este update. Evita que el mismo mensaje
+    # siga recorriendo publicidad/actividad después de haber sido bloqueado.
+    raise ApplicationHandlerStop
 
 
 

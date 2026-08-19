@@ -1,39 +1,37 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.8",
-  "status": "CANDIDATE_PREVALIDADA",
-  "base_backup": "R053",
-  "base_version": "1.0.7",
+  "version": "1.0.9",
+  "status": "CANDIDATE_LOCAL",
+  "base_backup": "R055",
+  "base_version": "1.0.8",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "RAÍZ PUBLICITARIA REFORZADA + NAVEGACIÓN UNIFICADA",
-  "live_validation": "PENDING_TELEGRAM_TEST",
-  "scope_lock": "RAIZ_TEXTO_REPETITIVO_LIMITE_CERO_UI_NAVEGACION",
+  "title": "PUERTA 7/7 CON ELIMINACIÓN CERTIFICADA",
+  "live_validation": "PENDING_JUSTRUNMY_TEST",
+  "scope_lock": "RAIZ_MEMBRESIA_7DE7_ELIMINACION_CERTIFICADA",
   "changes": [
-    "Texto normal puro hasta 50 caracteres visibles permanece 100% libre",
-    "Texto puro de más de 50 caracteres: primera coincidencia libre y persistida en vigilancia",
-    "Segunda coincidencia normalizada de la misma identidad se clasifica como PUBLICIDAD TEXTUAL REPETITIVA sin caducidad temporal",
-    "Vigilancia global por identidad entre grupos; cupos publicitarios permanecen independientes por grupo",
-    "CONTROLAR TEXTO SIMPLE manual se conserva con prioridad como excepción individual anti-evasión",
-    "PUBLICIDAD/DÍA=0 se presenta como BLOQUEO ESTRICTO y usa doble intento de eliminación del mensaje",
-    "Auditoría de eventos conserva decision BLOQUEADA y añade eliminacion_estado para distinguir eliminación confirmada/fallida",
-    "Las nuevas reglas nunca aplican ban, mute, expulsión ni restricción general; solo actúan sobre la publicación y muestran Membresía Publicitaria",
-    "/start y MENÚ PRINCIPAL comparten panel; navegación de raíz unificada; etiquetas antiguas v1.0.4 eliminadas",
-    "Se conserva la corrección validada del callback de TIEMPOS DE AVISO"
+    "Conservar sin cambios la definición actual de membresía 7/7 y sus 7 grupos obligatorios",
+    "Sustituir únicamente el borrado simple de la puerta 7/7 por doble intento de eliminación",
+    "Primer intento mediante Message.delete y segundo intento mediante bot.delete_message si Telegram rechaza el primero",
+    "Persistir por cada bloqueo 7/7 el resultado ELIMINADA_PRIMER_INTENTO, ELIMINADA_SEGUNDO_INTENTO o FALLO_ELIMINACION",
+    "Auditar user_id, username, nombre, chat, message_id, progreso 7/7, error y fecha del bloqueo",
+    "Detener el procesamiento del mismo update tras el bloqueo y aviso 7/7 mediante ApplicationHandlerStop",
+    "No modificar CONTROL PUBLICITARIO, detección publicitaria, límites, /orma, grupos, bots exentos, contadores ni moderación"
   ],
   "database_migration": [
-    "CREATE TABLE IF NOT EXISTS vigilancia_texto_repetitivo (compatible/no destructiva)",
-    "ADD COLUMN eventos_publicidad_control.eliminacion_estado TEXT si no existe"
+    "CREATE TABLE IF NOT EXISTS eventos_membresia_7de7 (compatible/no destructiva)",
+    "CREATE INDEX IF NOT EXISTS idx_eventos_membresia_7de7_usuario_fecha"
   ],
   "protected_unchanged": [
-    "7 grupos oficiales",
-    "membresía 7/7",
-    "bots estructurales exentos",
-    "grupo de pruebas",
+    "CONTROL PUBLICITARIO y su doble eliminación existente",
+    "reglas de PUBLICIDAD/DÍA=0",
+    "clasificación de texto repetitivo",
+    "/orma y navegación",
+    "bots oficiales exentos",
+    "7 grupos oficiales y grupo de pruebas",
     "contadores independientes por grupo",
-    "moderación manual",
-    "datos R053 existentes"
+    "datos existentes R055"
   ],
-  "updated_at": "15/08/2026 14:17:55"
+  "updated_at": "18/08/2026 19:32:00"
 }

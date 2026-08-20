@@ -7814,6 +7814,104 @@ async def limpiar_comandos_maximo_en_grupos(
         pass
 
 
+def _comando_slash_mensaje(mensaje):
+    """Devuelve el token /comando inicial de text/caption, o None."""
+    if mensaje is None:
+        return None
+
+    contenido = str(
+        getattr(mensaje, "text", None)
+        or getattr(mensaje, "caption", None)
+        or ""
+    ).strip()
+    if not contenido.startswith("/"):
+        return None
+    return contenido.split(maxsplit=1)[0]
+
+
+async def eliminar_comando_raiz_estricto(context, mensaje, chat):
+    """Doble intento de eliminación para comandos no autorizados de grupo."""
+    try:
+        await mensaje.delete()
+        return True, "ELIMINADA_PRIMER_INTENTO", None
+    except TelegramError as error_1:
+        logging.warning(
+            "Comando raíz: primer intento falló chat=%s message=%s: %s",
+            chat.id,
+            getattr(mensaje, "message_id", None),
+            error_1,
+        )
+
+    try:
+        await context.bot.delete_message(
+            chat_id=chat.id,
+            message_id=mensaje.message_id,
+        )
+        return True, "ELIMINADA_SEGUNDO_INTENTO", str(error_1)
+    except TelegramError as error_2:
+        logging.exception(
+            "COMANDO_RAIZ BLOQUEO FALLIDO chat=%s message=%s",
+            chat.id,
+            getattr(mensaje, "message_id", None),
+        )
+        return (
+            False,
+            "FALLO_ELIMINACION",
+            f"primer_intento={error_1}; segundo_intento={error_2}",
+        )
+
+
+async def control_comandos_exclusivos_raiz(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """Solo el administrador y bots oficiales de raíz pueden usar /comandos.
+
+    Esta barrera es independiente de la membresía 7/7: incluso un usuario 7/7
+    queda bloqueado si intenta ejecutar cualquier comando que empiece con '/'.
+    """
+    mensaje = update.effective_message
+    usuario = update.effective_user
+    chat = update.effective_chat
+
+    if (
+        not mensaje
+        or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or not es_grupo_controlado(chat)
+    ):
+        return
+
+    comando = _comando_slash_mensaje(mensaje)
+    if not comando:
+        return
+
+    # Únicas identidades autorizadas para comandos en los grupos controlados:
+    # el administrador de Máximo y los bots oficiales exentos de raíz.
+    if es_administrador_maximo(usuario) or es_bot_oficial_exento(usuario):
+        return
+
+    eliminado, estado, error = await eliminar_comando_raiz_estricto(
+        context=context,
+        mensaje=mensaje,
+        chat=chat,
+    )
+    logging.warning(
+        "COMANDO_RAIZ_BLOQUEADO user=%s username=%s chat=%s message=%s comando=%r estado=%s error=%s",
+        getattr(usuario, "id", None),
+        getattr(usuario, "username", None),
+        chat.id,
+        getattr(mensaje, "message_id", None),
+        comando,
+        estado,
+        error,
+    )
+
+    # No permitir que el mismo update llegue a /orma, comandos de otros bots,
+    # publicidad ni handlers posteriores.
+    raise ApplicationHandlerStop
+
+
 async def control_membresia_grupos(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -8484,6 +8582,13 @@ async def main():
     maximo_app.add_handler(
         TypeHandler(Update, control_anti_evasion_spam),
         group=-10,
+    )
+    maximo_app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS,
+            control_comandos_exclusivos_raiz,
+        ),
+        group=-7,
     )
     maximo_app.add_handler(
         MessageHandler(

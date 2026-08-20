@@ -2,13 +2,13 @@
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
   "version": "1.0.10",
-  "status": "CANDIDATE_LOCAL",
+  "status": "CANDIDATE_CORREGIDO_LOCAL",
   "base_backup": "R058",
   "base_version": "1.0.9",
   "base_commit": "4921ad0b4e13bee275c4850beb96fba80b722129",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "BARRERA 7/7 UNIVERSAL SIN BYPASS",
+  "title": "BARRERA 7/7 UNIVERSAL + COMANDOS EXCLUSIVOS DE RAÍZ",
   "live_validation": "PENDING_JUSTRUNMY_TEST",
   "scope_lock": "RAIZ_MEMBRESIA_7DE7_UNIVERSAL_SIN_BYPASS",
   "changes": [
@@ -19,7 +19,12 @@
     "Mantener la excepción estructural de bots oficiales de raíz, incluido @GroupAnonymousBot",
     "Aplicar doble intento de eliminación también a la barrera anti-evasión externa",
     "MaximoControlGroup deja de descartar updates pendientes durante reinicios; UnionMembresia conserva su comportamiento previo",
-    "No bloquear, banear ni restringir usuarios por la regla 7/7; solo retirar el mensaje y mostrar el aviso vigente"
+    "No bloquear, banear ni restringir usuarios por la regla 7/7; solo retirar el mensaje y mostrar el aviso vigente",
+    "Agregar barrera de comandos independiente de 7/7: ningún usuario puede ejecutar mensajes/captions que empiecen con / aunque tenga membresía 7/7",
+    "Autorizar comandos únicamente al administrador de Máximo y a bots oficiales exentos de raíz",
+    "Bloquear también /orma, /m, /comando@OtroBot y cualquier otro /comando cuando provenga de un usuario no autorizado",
+    "Usar doble intento de eliminación y ApplicationHandlerStop para cortar el update antes de handlers posteriores",
+    "Mantener /orma y demás comandos intactos para el administrador autorizado y bots oficiales de raíz"
   ],
   "database_migration": [
     "Sin cambios de esquema: reutiliza eventos_membresia_7de7 existente para auditar sender_chat mediante decision=BLOQUEADA_SENDER_CHAT_7DE7"
@@ -35,5 +40,5 @@
     "agente de respaldo, Dockerfile y requirements.txt",
     "datos existentes de maximo_control.db"
   ],
-  "updated_at": "19/08/2026 21:35:00"
+  "updated_at": "19/08/2026 21:53:00"
 }

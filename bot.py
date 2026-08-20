@@ -919,6 +919,80 @@ def registrar_evento_membresia_7de7_db(
         conexion.commit()
 
 
+def registrar_evento_sender_chat_7de7_db(
+    sender_chat,
+    chat,
+    message_id,
+    eliminacion_estado,
+    error=None,
+):
+    """Audita publicaciones como canal/chat que no pueden acreditar 7/7."""
+    ahora = datetime.now(timezone.utc).isoformat()
+    identidad_id = int(getattr(sender_chat, "id", 0) or 0)
+    username = getattr(sender_chat, "username", None)
+    nombre = getattr(sender_chat, "title", None) or "CANAL/CHAT"
+
+    with conectar_db() as conexion:
+        conexion.execute(
+            """
+            INSERT INTO eventos_membresia_7de7 (
+                user_id, username, nombre,
+                chat_id, chat_username, chat_nombre, message_id,
+                grupos_actuales, grupos_requeridos, decision,
+                eliminacion_estado, error, fecha_evento
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+            ON CONFLICT(chat_id, message_id, user_id) DO UPDATE SET
+                decision = excluded.decision,
+                eliminacion_estado = excluded.eliminacion_estado,
+                error = excluded.error,
+                fecha_evento = excluded.fecha_evento
+            """,
+            (
+                identidad_id,
+                username,
+                nombre,
+                chat.id,
+                getattr(chat, "username", None),
+                getattr(chat, "title", None),
+                message_id,
+                TOTAL_GRUPOS_OBLIGATORIOS,
+                "BLOQUEADA_SENDER_CHAT_7DE7",
+                eliminacion_estado,
+                str(error) if error else None,
+                ahora,
+            ),
+        )
+        conexion.commit()
+
+
+async def mostrar_aviso_sender_chat_7de7_temporal(context, chat, sender_chat):
+    """Aviso temporal para publicaciones hechas en nombre de canal/chat."""
+    nombre = html.escape(
+        str(getattr(sender_chat, "title", None) or "CANAL/CHAT")
+    )
+    aviso = await context.bot.send_message(
+        chat_id=chat.id,
+        text=(
+            "🔒 <b>MEMBRESÍA 7/7 REQUERIDA</b>\n\n"
+            f"La publicación enviada como <b>{nombre}</b> fue retirada.\n\n"
+            "Las publicaciones en nombre de un canal/chat no pueden acreditar "
+            "la membresía personal 7/7. Envía el mensaje con tu usuario de Telegram "
+            "y completa la membresía para participar."
+        ),
+        parse_mode="HTML",
+    )
+    asyncio.create_task(
+        eliminar_mensaje_despues(
+            aviso,
+            obtener_config_raiz_entero(
+                "aviso_membresia_segundos",
+                AVISO_MEMBRESIA_SEGUNDOS,
+            ),
+        )
+    )
+
+
 async def eliminar_mensaje_membresia_7de7_estricto(
     context,
     mensaje,
@@ -7208,6 +7282,38 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+async def eliminar_mensaje_anti_evasion_estricto(context, mensaje, chat):
+    """Doble intento de eliminación exclusivo para la barrera anti-evasión."""
+    try:
+        await mensaje.delete()
+        return True, "ELIMINADA_PRIMER_INTENTO", None
+    except TelegramError as error_1:
+        logging.warning(
+            "Anti-evasión primer intento falló chat=%s message=%s: %s",
+            chat.id,
+            getattr(mensaje, "message_id", None),
+            error_1,
+        )
+
+    try:
+        await context.bot.delete_message(
+            chat_id=chat.id,
+            message_id=mensaje.message_id,
+        )
+        return True, "ELIMINADA_SEGUNDO_INTENTO", str(error_1)
+    except TelegramError as error_2:
+        logging.exception(
+            "ANTI_EVASION BLOQUEO FALLIDO chat=%s message=%s",
+            chat.id,
+            getattr(mensaje, "message_id", None),
+        )
+        return (
+            False,
+            "FALLO_ELIMINACION",
+            f"primer_intento={error_1}; segundo_intento={error_2}",
+        )
+
+
 async def control_anti_evasion_spam(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -7290,15 +7396,13 @@ async def control_anti_evasion_spam(
     if not motivos:
         return
 
-    try:
-        await mensaje.delete()
-    except TelegramError as error:
-        logging.warning(
-            "Anti-evasión: no se pudo eliminar mensaje=%s chat=%s: %s",
-            getattr(mensaje, "message_id", None),
-            chat.id,
-            error,
+    eliminado, estado_eliminacion, error_eliminacion = (
+        await eliminar_mensaje_anti_evasion_estricto(
+            context=context,
+            mensaje=mensaje,
+            chat=chat,
         )
+    )
 
     # Segunda barrera: solo se intenta banear identidades bot no exentas.
     for bot_id in sorted(candidatos_ban):
@@ -7320,7 +7424,7 @@ async def control_anti_evasion_spam(
 
     logging.warning(
         "ANTI_EVASION_SPAM chat=%s message=%s from_user=%s via_bot=%s "
-        "guest_user=%s guest_chat=%s motivos=%s",
+        "guest_user=%s guest_chat=%s motivos=%s eliminacion=%s error=%s",
         chat.id,
         getattr(mensaje, "message_id", None),
         getattr(usuario, "id", None),
@@ -7328,6 +7432,8 @@ async def control_anti_evasion_spam(
         getattr(guest_user, "id", None),
         getattr(guest_chat, "id", None),
         ",".join(motivos),
+        estado_eliminacion,
+        error_eliminacion,
     )
 
     # Impide que el mismo update continúe hacia membresía y genere el aviso 0/7.
@@ -7712,29 +7818,83 @@ async def control_membresia_grupos(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
+    """Puerta raíz 7/7 universal para cualquier mensaje de grupo.
+
+    Se ejecuta antes de los handlers de comandos y de publicidad. /orma queda
+    expresamente protegido para conservar su flujo administrativo existente.
+    """
     mensaje = update.effective_message
     usuario = update.effective_user
     chat = update.effective_chat
 
     if (
         not mensaje
-        or not usuario
         or not chat
         or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
         or not es_grupo_controlado(chat)
     ):
         return
 
-    # ÚNICA EXCEPCIÓN: bots oficiales definidos de raíz.
-    # Todo lo demás (usuarios, administradores y bots externos) cumple 7/7.
-    if es_bot_oficial_exento(usuario):
+    # /orma es una herramienta administrativa protegida y conserva exactamente
+    # su handler actual. La puerta 7/7 no lo intercepta.
+    texto = str(getattr(mensaje, "text", "") or "").strip()
+    comando = texto.split(maxsplit=1)[0].lower() if texto.startswith("/") else ""
+    if comando in {
+        "/orma",
+        f"/orma@{MAXIMO_BOT_USERNAME.lower()}",
+    }:
         return
 
     if not config_raiz_activa("membresia_7de7_activa"):
         return
 
-    registrar_usuario_membresia(usuario)
+    # Telegram puede entregar publicaciones hechas en nombre de un canal/chat
+    # sin effective_user. Esa identidad no puede acreditar una membresía personal
+    # 7/7 y ya no queda fuera de la barrera por un simple `not usuario`.
+    sender_chat = getattr(mensaje, "sender_chat", None)
+    if usuario is None:
+        if sender_chat is None:
+            return
 
+        identidad_id = int(getattr(sender_chat, "id", 0) or 0)
+        eliminado, estado_eliminacion, error_eliminacion = (
+            await eliminar_mensaje_membresia_7de7_estricto(
+                context=context,
+                mensaje=mensaje,
+                chat=chat,
+                usuario_id=identidad_id,
+            )
+        )
+        try:
+            registrar_evento_sender_chat_7de7_db(
+                sender_chat=sender_chat,
+                chat=chat,
+                message_id=mensaje.message_id,
+                eliminacion_estado=estado_eliminacion,
+                error=error_eliminacion,
+            )
+        except Exception:
+            logging.exception(
+                "7/7 no pudo auditar sender_chat=%s chat=%s message=%s estado=%s",
+                identidad_id,
+                chat.id,
+                mensaje.message_id,
+                estado_eliminacion,
+            )
+
+        await mostrar_aviso_sender_chat_7de7_temporal(
+            context=context,
+            chat=chat,
+            sender_chat=sender_chat,
+        )
+        raise ApplicationHandlerStop
+
+    # ÚNICA EXCEPCIÓN estructural: bots oficiales definidos de raíz.
+    # Todo lo demás (usuarios, administradores y bots externos) cumple 7/7.
+    if es_bot_oficial_exento(usuario):
+        return
+
+    registrar_usuario_membresia(usuario)
     estado = await obtener_estado_membresia_7de7(usuario.id)
 
     if estado["completo"]:
@@ -7759,8 +7919,6 @@ async def control_membresia_grupos(
             error=error_eliminacion,
         )
     except Exception:
-        # La auditoría nunca debe impedir que la barrera 7/7 continúe
-        # mostrando su aviso y deteniendo el update ya bloqueado.
         logging.exception(
             "7/7 no pudo persistir auditoría user=%s chat=%s message=%s estado=%s",
             usuario.id,
@@ -7770,13 +7928,9 @@ async def control_membresia_grupos(
         )
 
     usuario_db = obtener_usuario_membresia_db(usuario.id)
-    union_iniciado = bool(
-        usuario_db and usuario_db["union_bot_iniciado"]
-    )
+    union_iniciado = bool(usuario_db and usuario_db["union_bot_iniciado"])
 
     if union_iniciado:
-        # Mantiene actualizado su panel privado, pero el aviso del grupo
-        # también aparece durante 1 minuto según la regla 7/7 definida.
         await mostrar_o_actualizar_panel_union(usuario.id)
 
     await mostrar_aviso_union_temporal(
@@ -7786,10 +7940,7 @@ async def control_membresia_grupos(
         estado=estado,
     )
 
-    # La puerta 7/7 es terminal para este update. Evita que el mismo mensaje
-    # siga recorriendo publicidad/actividad después de haber sido bloqueado.
     raise ApplicationHandlerStop
-
 
 
 async def borrar_aviso_origen_desde_payload(
@@ -8287,7 +8438,11 @@ async def union_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # ARRANQUE DE AMBOS BOTS
 # =========================================================
 
-async def iniciar_aplicacion(application: Application):
+async def iniciar_aplicacion(
+    application: Application,
+    *,
+    drop_pending_updates=True,
+):
     await application.initialize()
     await application.start()
 
@@ -8296,7 +8451,7 @@ async def iniciar_aplicacion(application: Application):
 
     await application.updater.start_polling(
         allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
+        drop_pending_updates=drop_pending_updates,
     )
 
 
@@ -8332,10 +8487,10 @@ async def main():
     )
     maximo_app.add_handler(
         MessageHandler(
-            filters.ChatType.GROUPS & ~filters.COMMAND,
+            filters.ChatType.GROUPS,
             control_membresia_grupos,
         ),
-        group=0,
+        group=-5,
     )
     maximo_app.add_handler(
         MessageHandler(
@@ -8391,8 +8546,11 @@ async def main():
         )
     )
 
-    await iniciar_aplicacion(maximo_app)
-    await iniciar_aplicacion(union_app)
+    # MaximoControlGroup no descarta mensajes acumulados durante reinicios:
+    # deben pasar por la moderación al recuperar el servicio. UnionMembresia
+    # conserva el comportamiento previo para no alterar su flujo privado.
+    await iniciar_aplicacion(maximo_app, drop_pending_updates=False)
+    await iniciar_aplicacion(union_app, drop_pending_updates=True)
 
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")

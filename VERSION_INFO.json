@@ -1,37 +1,39 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "status": "CANDIDATE_LOCAL",
-  "base_backup": "R055",
-  "base_version": "1.0.8",
+  "base_backup": "R058",
+  "base_version": "1.0.9",
+  "base_commit": "4921ad0b4e13bee275c4850beb96fba80b722129",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "PUERTA 7/7 CON ELIMINACIÓN CERTIFICADA",
+  "title": "BARRERA 7/7 UNIVERSAL SIN BYPASS",
   "live_validation": "PENDING_JUSTRUNMY_TEST",
-  "scope_lock": "RAIZ_MEMBRESIA_7DE7_ELIMINACION_CERTIFICADA",
+  "scope_lock": "RAIZ_MEMBRESIA_7DE7_UNIVERSAL_SIN_BYPASS",
   "changes": [
-    "Conservar sin cambios la definición actual de membresía 7/7 y sus 7 grupos obligatorios",
-    "Sustituir únicamente el borrado simple de la puerta 7/7 por doble intento de eliminación",
-    "Primer intento mediante Message.delete y segundo intento mediante bot.delete_message si Telegram rechaza el primero",
-    "Persistir por cada bloqueo 7/7 el resultado ELIMINADA_PRIMER_INTENTO, ELIMINADA_SEGUNDO_INTENTO o FALLO_ELIMINACION",
-    "Auditar user_id, username, nombre, chat, message_id, progreso 7/7, error y fecha del bloqueo",
-    "Detener el procesamiento del mismo update tras el bloqueo y aviso 7/7 mediante ApplicationHandlerStop",
-    "No modificar CONTROL PUBLICITARIO, detección publicitaria, límites, /orma, grupos, bots exentos, contadores ni moderación"
+    "La puerta 7/7 procesa todos los mensajes de grupos controlados, incluidos comandos Telegram, reenviados y captions, sin depender de ~filters.COMMAND",
+    "Proteger expresamente /orma para conservar intacto su flujo administrativo actual",
+    "Mover la puerta 7/7 al grupo -5, después de anti-evasión (-10) y antes de CommandHandler/publicidad",
+    "Bloquear y auditar sender_chat/canal cuando Telegram no entrega effective_user, evitando el bypass por publicación como canal/chat",
+    "Mantener la excepción estructural de bots oficiales de raíz, incluido @GroupAnonymousBot",
+    "Aplicar doble intento de eliminación también a la barrera anti-evasión externa",
+    "MaximoControlGroup deja de descartar updates pendientes durante reinicios; UnionMembresia conserva su comportamiento previo",
+    "No bloquear, banear ni restringir usuarios por la regla 7/7; solo retirar el mensaje y mostrar el aviso vigente"
   ],
   "database_migration": [
-    "CREATE TABLE IF NOT EXISTS eventos_membresia_7de7 (compatible/no destructiva)",
-    "CREATE INDEX IF NOT EXISTS idx_eventos_membresia_7de7_usuario_fecha"
+    "Sin cambios de esquema: reutiliza eventos_membresia_7de7 existente para auditar sender_chat mediante decision=BLOQUEADA_SENDER_CHAT_7DE7"
   ],
   "protected_unchanged": [
-    "CONTROL PUBLICITARIO y su doble eliminación existente",
-    "reglas de PUBLICIDAD/DÍA=0",
-    "clasificación de texto repetitivo",
-    "/orma y navegación",
-    "bots oficiales exentos",
+    "/orma y su handler/callback/navegación",
+    "CONTROL PUBLICITARIO",
+    "detección publicitaria y reglas PUBLICIDAD/DÍA=0",
+    "límites y contadores independientes por grupo",
     "7 grupos oficiales y grupo de pruebas",
-    "contadores independientes por grupo",
-    "datos existentes R055"
+    "bots oficiales exentos de raíz",
+    "paneles y navegación privados",
+    "agente de respaldo, Dockerfile y requirements.txt",
+    "datos existentes de maximo_control.db"
   ],
-  "updated_at": "18/08/2026 19:32:00"
+  "updated_at": "19/08/2026 21:35:00"
 }

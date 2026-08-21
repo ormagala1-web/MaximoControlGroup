@@ -172,7 +172,7 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.11"
 APP_VERSION_TITULO = "RAÍZ PUBLICITARIA REFORZADA + NAVEGACIÓN UNIFICADA"
 APP_VERSION_FECHA = "15/08/2026 13:38:24"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
@@ -5555,6 +5555,10 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     usuario = update.effective_user
     if not query or not usuario:
+        return
+
+    if not es_administrador_maximo(usuario):
+        await query.answer("Acceso no autorizado.", show_alert=True)
         return
 
     data = query.data or ""

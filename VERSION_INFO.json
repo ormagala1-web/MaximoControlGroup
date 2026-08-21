@@ -1,7 +1,7 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "status": "CANDIDATE_CORREGIDO_LOCAL",
   "base_backup": "R058",
   "base_version": "1.0.9",

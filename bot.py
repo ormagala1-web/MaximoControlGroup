@@ -5401,7 +5401,7 @@ def texto_centro_control_raiz():
     grupos = obtener_grupos_raiz_db()
     personalizados = len(bots_exentos_personalizados_raiz())
     return (
-        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/12</b>\n"
+        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 12/12</b>\n"
         + sello_version_panel()
         + "\n\n"
         "Estado operativo de las reglas de raíz:\n\n"

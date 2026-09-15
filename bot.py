@@ -107,7 +107,7 @@ ORMA_ADMIN_USER_ID = int(os.environ.get("ORMA_ADMIN_USER_ID", "7615865943") or 0
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
 
-TOTAL_GRUPOS_OBLIGATORIOS = 7
+TOTAL_GRUPOS_OBLIGATORIOS = 12
 AVISO_MEMBRESIA_SEGUNDOS = 60
 UNION_BOT_USERNAME = "UnionMembresia_bot"
 GRUPO_PRUEBAS_USERNAME = "Orma_Pruebas"
@@ -121,9 +121,14 @@ GRUPOS_OFICIALES = [
     (5, "🌎 UNIVERSO CIBERNÉTICO PERÚ 🇵🇪", "mundocibertetico", "UniversoCibertneticoPeru_bot"),
     (6, "💻 Metaverso Streaming Perú 🇵🇪", "metaversostreaminggo", "MetaversoPeru_bot"),
     (7, "🎭 MUNDO STREAMING PERÚ 🇵🇪", "mymundostreaming", "MundoStreamingPeru_bot"),
+    (8, "👑 Club Premium Latino Digital", "Club_Premium_Latino_Digital", "Club_Premium_Latino_bot"),
+    (9, "🎬 Mundo Play | Entretenimiento Digital", "Mundo_Play_E_Digital", "Mundo_Play_E_Digital_bot"),
+    (10, "⚡ CONECTA2 STREAMING & SERVICIOS", "Conectados_Streaming_Servicios", "Conecta2_Streaming_bot"),
+    (11, "🌎 Imperio Digital | Streaming & Servicios", "Imperio_Digital_Streaming", "Imperio_Digital_Streaming_bot"),
+    (12, "💠 The Digital Club | Perú & Latam", "The_Digital_Club_Peru_Latam", "The_Digital_Club_Peru_Latam_bot"),
 ]
 
-# Bots oficiales excluidos DE RAÍZ del control 7/7.
+# Bots oficiales excluidos DE RAÍZ del control 12/12.
 # Cualquier otro bot, usuario o administrador sí queda sujeto a la regla.
 BOTS_OFICIALES_EXENTOS = {
     "distritostreaminguniversal_bot",
@@ -133,6 +138,12 @@ BOTS_OFICIALES_EXENTOS = {
     "universocibertneticoperu_bot",
     "metaversoperu_bot",
     "mundostreamingperu_bot",
+    "club_premium_latino_bot",
+    "mundo_play_e_digital_bot",
+    "conecta2_streaming_bot",
+    "imperio_digital_streaming_bot",
+    "the_digital_club_peru_latam_bot",
+
     "maximocontrolgroup_bot",
     "unionmembresia_bot",
     "publicidadcontrolstreaming_bot",
@@ -161,7 +172,7 @@ CAPTURAS_ORMA = {}
 ENTRADAS_CONTROL_PUBLICIDAD = {}
 
 # Estados efímeros exclusivos de /orma CONTROL MÁXIMO.
-# No alteran las reglas raíz de los 7 grupos.
+# No alteran las reglas raíz de los 12 grupos.
 SELECCIONES_MODERACION_ORMA = {}
 ENTRADAS_ORMA_TOTAL = {}
 
@@ -172,7 +183,7 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.12"
 APP_VERSION_TITULO = "RAÍZ PUBLICITARIA REFORZADA + NAVEGACIÓN UNIFICADA"
 APP_VERSION_FECHA = "15/08/2026 13:38:24"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
@@ -235,7 +246,7 @@ def teclado_menu_principal_orma():
             callback_data="orma_clientes_editados:0",
         )],
         [InlineKeyboardButton(
-            "⚙️ CONTROL DE RAÍZ 7/7",
+            "⚙️ CONTROL DE RAÍZ 12/12",
             callback_data="orma_raiz",
         )],
         [InlineKeyboardButton(
@@ -285,6 +296,15 @@ def inicializar_base_datos():
             "maximo_grupos": "INTEGER NOT NULL DEFAULT 0",
             "alcanzo_7de7": "INTEGER NOT NULL DEFAULT 0",
             "perdio_grupos": "INTEGER NOT NULL DEFAULT 0",
+            "grupos_base_7_actuales": "INTEGER NOT NULL DEFAULT 0",
+            "grupos_expansion_5_actuales": "INTEGER NOT NULL DEFAULT 0",
+            "maximo_expansion_5": "INTEGER NOT NULL DEFAULT 0",
+            "alcanzo_5de5": "INTEGER NOT NULL DEFAULT 0",
+            "alcanzo_12de12": "INTEGER NOT NULL DEFAULT 0",
+            "perdio_12de12": "INTEGER NOT NULL DEFAULT 0",
+            "grupos_7de7_historico": "INTEGER",
+            "maximo_7de7_historico": "INTEGER",
+
             "total_verificaciones": "INTEGER NOT NULL DEFAULT 0",
             "fecha_primera_verificacion": "TEXT",
             "fecha_ultima_verificacion": "TEXT",
@@ -294,11 +314,32 @@ def inicializar_base_datos():
             "fecha_ultimo_acceso": "TEXT",
         }
 
+        snapshot_7de7_necesario = (
+            not columna_existe(
+                conexion,
+                "usuarios_membresia",
+                "grupos_7de7_historico",
+            )
+        )
+
         for columna, definicion in columnas_monitoreo.items():
             if not columna_existe(conexion, "usuarios_membresia", columna):
                 conexion.execute(
                     f"ALTER TABLE usuarios_membresia ADD COLUMN {columna} {definicion}"
                 )
+
+        if snapshot_7de7_necesario:
+            conexion.execute(
+                """
+                UPDATE usuarios_membresia
+                SET grupos_7de7_historico = grupos_actuales,
+                    maximo_7de7_historico = maximo_grupos,
+                    grupos_base_7_actuales = CASE
+                        WHEN grupos_actuales > 7 THEN 7
+                        ELSE COALESCE(grupos_actuales, 0)
+                    END
+                """
+            )
 
         conexion.execute(
             """
@@ -310,7 +351,7 @@ def inicializar_base_datos():
             """
         )
 
-        # v1.0.9: auditoría persistente de la puerta raíz de membresía 7/7.
+        # v1.0.9: auditoría persistente de la puerta raíz de membresía 12/12.
         # Registra el resultado real de la eliminación para poder distinguir
         # un bloqueo confirmado de un fallo de Telegram sin alterar otras reglas.
         conexion.execute(
@@ -874,7 +915,7 @@ def registrar_evento_membresia_7de7_db(
     eliminacion_estado,
     error=None,
 ):
-    """Audita únicamente bloqueos de la puerta raíz 7/7."""
+    """Audita únicamente bloqueos de la puerta raíz 12/12."""
     ahora = datetime.now(timezone.utc).isoformat()
     nombre = " ".join(
         parte for parte in [usuario.first_name, usuario.last_name] if parte
@@ -926,7 +967,7 @@ def registrar_evento_sender_chat_7de7_db(
     eliminacion_estado,
     error=None,
 ):
-    """Audita publicaciones como canal/chat que no pueden acreditar 7/7."""
+    """Audita publicaciones como canal/chat que no pueden acreditar 12/12."""
     ahora = datetime.now(timezone.utc).isoformat()
     identidad_id = int(getattr(sender_chat, "id", 0) or 0)
     username = getattr(sender_chat, "username", None)
@@ -974,10 +1015,10 @@ async def mostrar_aviso_sender_chat_7de7_temporal(context, chat, sender_chat):
     aviso = await context.bot.send_message(
         chat_id=chat.id,
         text=(
-            "🔒 <b>MEMBRESÍA 7/7 REQUERIDA</b>\n\n"
+            "🔒 <b>MEMBRESÍA 12/12 REQUERIDA</b>\n\n"
             f"La publicación enviada como <b>{nombre}</b> fue retirada.\n\n"
             "Las publicaciones en nombre de un canal/chat no pueden acreditar "
-            "la membresía personal 7/7. Envía el mensaje con tu usuario de Telegram "
+            "la membresía personal 12/12. Envía el mensaje con tu usuario de Telegram "
             "y completa la membresía para participar."
         ),
         parse_mode="HTML",
@@ -999,13 +1040,13 @@ async def eliminar_mensaje_membresia_7de7_estricto(
     chat,
     usuario_id,
 ):
-    """Doble intento de eliminación exclusivo para la puerta raíz 7/7."""
+    """Doble intento de eliminación exclusivo para la puerta raíz 12/12."""
     try:
         await mensaje.delete()
         return True, "ELIMINADA_PRIMER_INTENTO", None
     except TelegramError as error_1:
         logging.warning(
-            "7/7 primer intento de eliminación falló user=%s chat=%s message=%s: %s",
+            "12/12 primer intento de eliminación falló user=%s chat=%s message=%s: %s",
             usuario_id,
             chat.id,
             mensaje.message_id,
@@ -1020,7 +1061,7 @@ async def eliminar_mensaje_membresia_7de7_estricto(
         return True, "ELIMINADA_SEGUNDO_INTENTO", str(error_1)
     except TelegramError as error_2:
         logging.exception(
-            "7/7 BLOQUEO FALLIDO user=%s chat=%s message=%s",
+            "12/12 BLOQUEO FALLIDO user=%s chat=%s message=%s",
             usuario_id,
             chat.id,
             mensaje.message_id,
@@ -1049,7 +1090,16 @@ def guardar_origen_union_db(user_id, chat_id, username=None, nombre=None):
 
 def registrar_verificacion_membresia_db(user_id, estado):
     ahora = datetime.now(timezone.utc).isoformat()
-    actuales = len(estado["completados"])
+    completados = estado["completados"]
+    actuales = len(completados)
+
+    ordenes = {
+        int(grupo["orden"])
+        for grupo in completados
+        if grupo["orden"] is not None
+    }
+    base_7_actuales = sum(1 for orden in range(1, 8) if orden in ordenes)
+    expansion_5_actuales = sum(1 for orden in range(8, 13) if orden in ordenes)
 
     with conectar_db() as conexion:
         fila = conexion.execute(
@@ -1061,12 +1111,30 @@ def registrar_verificacion_membresia_db(user_id, estado):
             return
 
         maximo_anterior = int(fila["maximo_grupos"] or 0)
-        alcanzo_antes = bool(fila["alcanzo_7de7"])
         maximo_nuevo = max(maximo_anterior, actuales)
-        alcanzo_ahora = alcanzo_antes or actuales >= TOTAL_GRUPOS_OBLIGATORIOS
-        perdio = bool(fila["perdio_grupos"]) or (
-            alcanzo_ahora and actuales < TOTAL_GRUPOS_OBLIGATORIOS
+
+        alcanzo_7_antes = bool(fila["alcanzo_7de7"])
+        alcanzo_7_ahora = alcanzo_7_antes or base_7_actuales == 7
+        perdio_7 = bool(fila["perdio_grupos"]) or (
+            alcanzo_7_ahora and base_7_actuales < 7
         )
+
+        maximo_expansion_anterior = int(fila["maximo_expansion_5"] or 0)
+        maximo_expansion_nuevo = max(
+            maximo_expansion_anterior,
+            expansion_5_actuales,
+        )
+        alcanzo_5_antes = bool(fila["alcanzo_5de5"])
+        alcanzo_5_ahora = alcanzo_5_antes or expansion_5_actuales == 5
+
+        alcanzo_12_antes = bool(fila["alcanzo_12de12"])
+        alcanzo_12_ahora = alcanzo_12_antes or (
+            base_7_actuales == 7 and expansion_5_actuales == 5
+        )
+        perdio_12 = bool(fila["perdio_12de12"]) or (
+            alcanzo_12_ahora and actuales < TOTAL_GRUPOS_OBLIGATORIOS
+        )
+
         primera = fila["fecha_primera_verificacion"] or ahora
 
         conexion.execute(
@@ -1074,8 +1142,14 @@ def registrar_verificacion_membresia_db(user_id, estado):
             UPDATE usuarios_membresia
             SET grupos_actuales = ?,
                 maximo_grupos = ?,
+                grupos_base_7_actuales = ?,
+                grupos_expansion_5_actuales = ?,
+                maximo_expansion_5 = ?,
                 alcanzo_7de7 = ?,
                 perdio_grupos = ?,
+                alcanzo_5de5 = ?,
+                alcanzo_12de12 = ?,
+                perdio_12de12 = ?,
                 total_verificaciones = COALESCE(total_verificaciones, 0) + 1,
                 fecha_primera_verificacion = ?,
                 fecha_ultima_verificacion = ?,
@@ -1086,8 +1160,14 @@ def registrar_verificacion_membresia_db(user_id, estado):
             (
                 actuales,
                 maximo_nuevo,
-                1 if alcanzo_ahora else 0,
-                1 if perdio else 0,
+                base_7_actuales,
+                expansion_5_actuales,
+                maximo_expansion_nuevo,
+                1 if alcanzo_7_ahora else 0,
+                1 if perdio_7 else 0,
+                1 if alcanzo_5_ahora else 0,
+                1 if alcanzo_12_ahora else 0,
+                1 if perdio_12 else 0,
                 primera,
                 ahora,
                 ahora,
@@ -1139,9 +1219,13 @@ def resumen_monitoreo_union_db():
                 COUNT(*) AS total,
                 SUM(CASE WHEN union_bot_iniciado = 1 AND total_verificaciones = 0 THEN 1 ELSE 0 END) AS sin_verificar,
                 SUM(CASE WHEN grupos_actuales = 0 THEN 1 ELSE 0 END) AS cero,
-                SUM(CASE WHEN grupos_actuales BETWEEN 1 AND 6 THEN 1 ELSE 0 END) AS proceso,
-                SUM(CASE WHEN grupos_actuales = 7 THEN 1 ELSE 0 END) AS completos,
-                SUM(CASE WHEN perdio_grupos = 1 THEN 1 ELSE 0 END) AS perdieron
+                SUM(CASE WHEN grupos_actuales BETWEEN 1 AND 11 THEN 1 ELSE 0 END) AS proceso,
+                SUM(CASE WHEN grupos_actuales = 12 THEN 1 ELSE 0 END) AS completos,
+                SUM(CASE WHEN alcanzo_7de7 = 1 THEN 1 ELSE 0 END) AS alcanzo_base_7,
+                SUM(CASE WHEN perdio_grupos = 1 THEN 1 ELSE 0 END) AS perdieron_base_7,
+                SUM(CASE WHEN alcanzo_5de5 = 1 THEN 1 ELSE 0 END) AS alcanzo_expansion_5,
+                SUM(CASE WHEN alcanzo_12de12 = 1 THEN 1 ELSE 0 END) AS alcanzo_total_12,
+                SUM(CASE WHEN perdio_12de12 = 1 THEN 1 ELSE 0 END) AS perdieron_total_12
             FROM usuarios_membresia
             WHERE union_bot_iniciado = 1
             """
@@ -1161,7 +1245,14 @@ def resumen_monitoreo_union_db():
 
         recientes = conexion.execute(
             """
-            SELECT user_id, username, nombre, grupos_actuales, fecha_ultimo_acceso
+            SELECT
+                user_id,
+                username,
+                nombre,
+                grupos_actuales,
+                grupos_base_7_actuales,
+                grupos_expansion_5_actuales,
+                fecha_ultimo_acceso
             FROM usuarios_membresia
             WHERE union_bot_iniciado = 1
             ORDER BY COALESCE(fecha_ultimo_acceso, fecha_actualizacion) DESC
@@ -1177,40 +1268,54 @@ def texto_monitoreo_union():
     t = resumen["totales"]
 
     lineas = [
-        "📊 <b>MONITOREO DE MEMBRESÍA</b>",
+        "?? <b>MONITOREO DE MEMBRES?A</b>",
         "",
-        f"👥 Usuarios registrados: <b>{int(t['total'] or 0)}</b>",
-        f"⏳ Iniciaron sin verificar: <b>{int(t['sin_verificar'] or 0)}</b>",
-        f"🔴 Estado 0/7: <b>{int(t['cero'] or 0)}</b>",
-        f"🟡 Estado 1–6/7: <b>{int(t['proceso'] or 0)}</b>",
-        f"✅ Estado 7/7: <b>{int(t['completos'] or 0)}</b>",
-        f"↩️ Perdieron grupos después: <b>{int(t['perdieron'] or 0)}</b>",
+        f"?? Usuarios registrados: <b>{int(t['total'] or 0)}</b>",
+        f"? Iniciaron sin verificar: <b>{int(t['sin_verificar'] or 0)}</b>",
+        f"?? Estado 0/12: <b>{int(t['cero'] or 0)}</b>",
+        f"?? Estado 1?11/12: <b>{int(t['proceso'] or 0)}</b>",
+        f"? Estado 12/12: <b>{int(t['completos'] or 0)}</b>",
         "",
-        "📍 <b>ORIGEN DE LOS ACCESOS</b>",
+        "?? <b>COMPATIBILIDAD HIST?RICA</b>",
+        f"? Alcanzaron base 7/7: <b>{int(t['alcanzo_base_7'] or 0)}</b>",
+        f"? Perdieron base 7/7 despu?s: <b>{int(t['perdieron_base_7'] or 0)}</b>",
+        f"? Alcanzaron expansi?n 5/5: <b>{int(t['alcanzo_expansion_5'] or 0)}</b>",
+        f"? Alcanzaron total 12/12: <b>{int(t['alcanzo_total_12'] or 0)}</b>",
+        f"? Perdieron 12/12 despu?s: <b>{int(t['perdieron_total_12'] or 0)}</b>",
+        "",
+        "?? <b>ORIGEN DE LOS ACCESOS</b>",
     ]
 
     if resumen["origenes"]:
         for fila in resumen["origenes"]:
             lineas.append(
-                f"• {html.escape(str(fila['origen']))}: <b>{int(fila['total'])}</b>"
+                f"? {html.escape(str(fila['origen']))}: "
+                f"<b>{int(fila['total'])}</b>"
             )
     else:
-        lineas.append("• Todavía sin registros")
+        lineas.append("? Todav?a sin registros")
 
-    lineas.extend(["", "🕐 <b>ACCESOS RECIENTES</b>"])
+    lineas.extend(["", "?? <b>ACCESOS RECIENTES</b>"])
 
     if resumen["recientes"]:
         for fila in resumen["recientes"]:
             identidad = fila["username"] or fila["nombre"] or str(fila["user_id"])
             lineas.append(
-                f"• {html.escape(str(identidad))} · "
-                f"<b>{int(fila['grupos_actuales'] or 0)}/7</b> · "
+                f"? {html.escape(str(identidad))} ? "
+                f"<b>{int(fila['grupos_actuales'] or 0)}/12</b> "
+                f"(7/7: {int(fila['grupos_base_7_actuales'] or 0)}/7 ? "
+                f"5/5: {int(fila['grupos_expansion_5_actuales'] or 0)}/5) ? "
                 f"{formatear_fecha_peru(fila['fecha_ultimo_acceso'])}"
             )
     else:
-        lineas.append("• Todavía sin registros")
+        lineas.append("? Todav?a sin registros")
 
-    lineas.extend(["", "Actualizado: " + formatear_fecha_peru(datetime.now(timezone.utc).isoformat())])
+    lineas.extend([
+        "",
+        "Actualizado: " + formatear_fecha_peru(
+            datetime.now(timezone.utc).isoformat()
+        ),
+    ])
     return "\n".join(lineas)
 
 
@@ -1649,7 +1754,7 @@ async def mostrar_aviso_union_temporal(
         f"🏷️ <b>Tipo:</b> {tipo}\n"
         f"🛡️ <b>Rol:</b> {rol}\n"
         f"📊 <b>Membresía:</b> {progreso}\n\n"
-        "Para participar debes completar tu membresía en los 7 grupos oficiales.\n\n"
+        "Para participar debes completar tu membresía en los 12 grupos oficiales.\n\n"
         "Pulsa el botón para continuar de forma privada."
     )
 
@@ -3253,7 +3358,7 @@ def eliminar_panel_orma_db(propietario_id):
 
 def resumen_por_grupos_orma(objetivo_tipo, objetivo_id):
     """
-    Panorama de los 7 grupos oficiales para /orma.
+    Panorama de los 12 grupos oficiales para /orma.
 
     Está diseñado para ser rápido: usa consultas agrupadas sobre la base local
     y NO hace llamadas adicionales a Telegram. La membresía en tiempo real se
@@ -3505,14 +3610,14 @@ def cabecera_identidad_orma(captura, *, rol=None, habilitado=None):
         f"• Bot: <b>{es_bot}</b>",
         f"• Rol origen: <b>{html.escape(rol_txt)}</b>",
         f"• Administrador: <b>{administrador}</b>",
-        f"• Habilitado 7/7: <b>{habilitado_txt}</b>",
+        f"• Habilitado 12/12: <b>{habilitado_txt}</b>",
     ])
 
 
 async def estado_7grupos_orma_concurrente(objetivo_id):
     """
-    Consulta los 7 grupos EN PARALELO para que /orma siga siendo rápido.
-    No reemplaza ni modifica la regla raíz 7/7.
+    Consulta los 12 grupos EN PARALELO para que /orma siga siendo rápido.
+    No reemplaza ni modifica la regla raíz 12/12.
     """
     if MAXIMO_APP_REF is None:
         return []
@@ -4468,11 +4573,11 @@ def teclado_ficha_orma(captura_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 ACTUALIZAR FICHA", callback_data=f"orma_ficha:{captura_id}")],
         [
-            InlineKeyboardButton("🔐 MEMBRESÍA 7/7", callback_data=f"orma_membresia:{captura_id}"),
-            InlineKeyboardButton("📊 ACTIVIDAD 7/7", callback_data=f"orma_actividad:{captura_id}"),
+            InlineKeyboardButton("🔐 MEMBRESÍA 12/12", callback_data=f"orma_membresia:{captura_id}"),
+            InlineKeyboardButton("📊 ACTIVIDAD 12/12", callback_data=f"orma_actividad:{captura_id}"),
         ],
         [
-            InlineKeyboardButton("📣 PUBLICIDAD 7/7", callback_data=f"orma_publicidad:{captura_id}"),
+            InlineKeyboardButton("📣 PUBLICIDAD 12/12", callback_data=f"orma_publicidad:{captura_id}"),
             InlineKeyboardButton("🚪 ENTRADAS / SALIDAS", callback_data=f"orma_movimientos:{captura_id}"),
         ],
         [InlineKeyboardButton("🛡️ CONTROL TOTAL · MODERACIÓN", callback_data=f"orma_mod:{captura_id}")],
@@ -5088,7 +5193,7 @@ async def resolver_chat_grupo_orma(bot, indice):
 
 async def teclado_lista_publicidad_grupos(captura, bot):
     filas = []
-    for indice in range(1, 8):
+    for indice in range(1, TOTAL_GRUPOS_OBLIGATORIOS + 1):
         grupo = await resolver_chat_grupo_orma(bot, indice)
         if not grupo or grupo["chat_id"] is None:
             etiqueta = f"{indice}. ⚠️ Grupo no disponible"
@@ -5114,7 +5219,7 @@ async def teclado_lista_publicidad_grupos(captura, bot):
 
     filas.extend([
         [InlineKeyboardButton(
-            "🌐 CONTROL GLOBAL 7/7",
+            "🌐 CONTROL GLOBAL 12/12",
             callback_data=f"orma_publicidad:{captura['id']}",
         )],
         [InlineKeyboardButton(
@@ -5249,7 +5354,7 @@ def teclado_seleccion_moderacion(captura_id, accion, seleccionados):
     filas = [
         [
             InlineKeyboardButton(
-                "✅ TODOS 7/7",
+                "✅ TODOS 12/12",
                 callback_data=f"orma_modall:{captura_id}:{accion}",
             ),
             InlineKeyboardButton(
@@ -5258,7 +5363,7 @@ def teclado_seleccion_moderacion(captura_id, accion, seleccionados):
             ),
         ]
     ]
-    for indice in range(1, 8):
+    for indice in range(1, TOTAL_GRUPOS_OBLIGATORIOS + 1):
         grupo = grupo_orma_por_indice(indice)
         marca = "✅" if indice in seleccionados else "⬜"
         filas.append([
@@ -5296,24 +5401,24 @@ def texto_centro_control_raiz():
     grupos = obtener_grupos_raiz_db()
     personalizados = len(bots_exentos_personalizados_raiz())
     return (
-        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/7</b>\n"
+        "⚙️ <b>CENTRO DE CONTROL DE RAÍZ 7/12</b>\n"
         + sello_version_panel()
         + "\n\n"
         "Estado operativo de las reglas de raíz:\n\n"
-        f"🛡 Membresía 7/7: <b>{membresia}</b>\n"
-        f"🌐 Grupos oficiales estructurales: <b>{len(grupos)}/7</b>\n"
+        f"🛡 Membresía 12/12: <b>{membresia}</b>\n"
+        f"🌐 Grupos oficiales estructurales: <b>{len(grupos)}/12</b>\n"
         f"🤖 Bots exentos fijos: <b>{len(BOTS_OFICIALES_EXENTOS)}</b>\n"
         f"➕ Bots exentos añadidos: <b>{personalizados}</b>\n"
         f"🧪 @{GRUPO_PRUEBAS_USERNAME}: <b>{pruebas}</b>\n\n"
         "Selecciona el módulo que deseas administrar. "
-        "Las identidades estructurales de los 7 grupos y los bots oficiales quedan protegidas."
+        "Las identidades estructurales de los 12 grupos y los bots oficiales quedan protegidas."
     )
 
 
 def teclado_centro_control_raiz():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛡 MEMBRESÍA 7/7", callback_data="orma_raiz_membresia")],
-        [InlineKeyboardButton("🌐 GRUPOS OFICIALES 7/7", callback_data="orma_raiz_grupos")],
+        [InlineKeyboardButton("🛡 MEMBRESÍA 12/12", callback_data="orma_raiz_membresia")],
+        [InlineKeyboardButton("🌐 GRUPOS OFICIALES 12/12", callback_data="orma_raiz_grupos")],
         [InlineKeyboardButton("🤖 BOTS EXENTOS / AUTORIZADOS", callback_data="orma_raiz_bots")],
         [InlineKeyboardButton("⏱ TIEMPOS DE AVISO", callback_data="orma_raiz_tiempos")],
         [InlineKeyboardButton("🧪 GRUPO DE PRUEBAS", callback_data="orma_raiz_pruebas")],
@@ -5330,14 +5435,14 @@ def texto_membresia_raiz():
     activa = config_raiz_activa("membresia_7de7_activa")
     aviso = obtener_config_raiz_entero("aviso_membresia_segundos", AVISO_MEMBRESIA_SEGUNDOS)
     return (
-        "🛡 <b>MEMBRESÍA DE RAÍZ 7/7</b>\n"
+        "🛡 <b>MEMBRESÍA DE RAÍZ 7/12</b>\n"
         + sello_version_panel()
         + "\n\n"
         f"Estado: <b>{'🟢 ACTIVA' if activa else '🔴 PAUSADA'}</b>\n"
-        "Regla estructural: <b>7 grupos oficiales obligatorios</b>\n"
+        "Regla estructural: <b>12 grupos oficiales obligatorios</b>\n"
         f"Aviso temporal: <b>{aviso} segundos</b>\n\n"
         "Al pausar esta regla no se borran grupos, clientes ni historiales. "
-        "Solo se suspende la puerta de membresía 7/7 hasta volver a activarla."
+        "Solo se suspende la puerta de membresía 12/12 hasta volver a activarla."
     )
 
 
@@ -5345,10 +5450,10 @@ def teclado_membresia_raiz():
     activa = config_raiz_activa("membresia_7de7_activa")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            "🔴 PAUSAR MEMBRESÍA 7/7" if activa else "🟢 ACTIVAR MEMBRESÍA 7/7",
+            "🔴 PAUSAR MEMBRESÍA 12/12" if activa else "🟢 ACTIVAR MEMBRESÍA 12/12",
             callback_data="orma_raiz_membresia_toggle",
         )],
-        [InlineKeyboardButton("🌐 VER LOS 7 GRUPOS", callback_data="orma_raiz_grupos")],
+        [InlineKeyboardButton("🌐 VER LOS 12 GRUPOS", callback_data="orma_raiz_grupos")],
         [InlineKeyboardButton("⏱ CONFIGURAR AVISO", callback_data="orma_raiz_tiempos_membresia")],
         *teclado_navegacion_raiz(),
     ])
@@ -5356,10 +5461,10 @@ def teclado_membresia_raiz():
 
 def texto_grupos_raiz():
     lineas = [
-        "🌐 <b>GRUPOS OFICIALES 7/7</b>",
+        "🌐 <b>GRUPOS OFICIALES 12/12</b>",
         sello_version_panel(),
         "",
-        "Los 7 grupos forman la estructura protegida de Máximo Control.",
+        "Los 12 grupos forman la estructura protegida de Máximo Control.",
         "Pulsa uno para consultar su ficha de raíz.",
         "",
     ]
@@ -5368,7 +5473,7 @@ def texto_grupos_raiz():
             f"{grupo['orden']}. {'🟢' if grupo['activo'] else '🔴'} "
             f"<b>{html.escape(grupo['nombre'])}</b>"
         )
-    lineas += ["", "🔒 Alta/baja estructural protegida para evitar romper la regla 7/7."]
+    lineas += ["", "🔒 Alta/baja estructural protegida para evitar romper la regla 12/12."]
     return "\n".join(lineas)
 
 
@@ -5470,7 +5575,7 @@ def texto_pruebas_raiz():
         + "\n\n"
         f"Grupo: <b>@{GRUPO_PRUEBAS_USERNAME}</b>\n"
         f"Estado: <b>{'🟢 BAJO CONTROL' if activo else '🔴 FUERA DE CONTROL'}</b>\n\n"
-        "Este interruptor solo afecta al grupo de pruebas. Los 7 grupos oficiales permanecen intactos."
+        "Este interruptor solo afecta al grupo de pruebas. Los 12 grupos oficiales permanecen intactos."
     )
 
 
@@ -5513,7 +5618,7 @@ def texto_reglas_protegidas_raiz():
         "• Publicar en un grupo no consume el cupo de otro.\n\n"
         "🕒 <b>CICLO DIARIO MÓVIL DE 24 HORAS</b>\n"
         "• El límite diario conserva su ancla propia.\n\n"
-        "🔒 Los 7 grupos oficiales, bots estructurales y controles existentes permanecen protegidos."
+        "🔒 Los 12 grupos oficiales, bots estructurales y controles existentes permanecen protegidos."
     )
 
 
@@ -5533,8 +5638,8 @@ def texto_auditoria_raiz():
         "📊 <b>AUDITORÍA OPERATIVA DE RAÍZ</b>",
         "",
         f"🏷 Versión: <b>v{APP_VERSION} · {APP_VERSION_TITULO}</b>",
-        f"🛡 Membresía 7/7: <b>{'ACTIVA' if memb else 'PAUSADA'}</b>",
-        f"🌐 Grupos estructurales: <b>{len(grupos)}/7</b>",
+        f"🛡 Membresía 12/12: <b>{'ACTIVA' if memb else 'PAUSADA'}</b>",
+        f"🌐 Grupos estructurales: <b>{len(grupos)}/12</b>",
         f"🤖 Exentos estructurales: <b>{len(BOTS_OFICIALES_EXENTOS)}</b>",
         f"➕ Exentos añadidos: <b>{len(personalizados)}</b>",
         f"🧪 Grupo de pruebas: <b>{'BAJO CONTROL' if pruebas else 'FUERA DE CONTROL'}</b>",
@@ -5607,7 +5712,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "orma_raiz_membresia_toggle":
         estado = alternar_config_raiz("membresia_7de7_activa")
-        await query.answer("Membresía 7/7 activada" if estado else "Membresía 7/7 pausada")
+        await query.answer("Membresía 12/12 activada" if estado else "Membresía 12/12 pausada")
         await safe_query_edit_message(query, texto_membresia_raiz(), parse_mode="HTML", reply_markup=teclado_membresia_raiz())
         return
 
@@ -5630,7 +5735,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(
                 teclado_navegacion_raiz(
                     "orma_raiz_grupos",
-                    "⬅️ 7 GRUPOS OFICIALES",
+                    "⬅️ 12 GRUPOS OFICIALES",
                 )
             ),
         )
@@ -5834,13 +5939,13 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if captura["objetivo_tipo"] not in {"USUARIO", "BOT"}:
             texto_membresia = (
                 "🔐 <b>MEMBRESÍA</b>\n\n"
-                "Esta identidad es un canal/chat y no puede evaluarse con la regla de usuario 7/7."
+                "Esta identidad es un canal/chat y no puede evaluarse con la regla de usuario 12/12."
             )
         else:
             estado = await obtener_estado_membresia_7de7(captura["objetivo_id"])
             marcas = estado_membresia_por_username(estado)
             lineas = [
-                "🔐 <b>MEMBRESÍA 7/7 · DETALLE</b>",
+                "🔐 <b>MEMBRESÍA 12/12 · DETALLE</b>",
                 "",
                 f"Progreso: <b>{len(estado['completados'])}/{estado['total']}</b>",
                 "",
@@ -6126,7 +6231,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎯 <b>CONTROL PUBLICITARIO POR GRUPO</b>\n\n"
             + cabecera_identidad_orma(captura, rol=rol)
             + "\n\nSelecciona un grupo. Cada grupo puede tener reglas totalmente "
-              "independientes. HEREDADO significa que obedece al control global 7/7.",
+              "independientes. HEREDADO significa que obedece al control global 12/12.",
             parse_mode="HTML",
             reply_markup=await teclado_lista_publicidad_grupos(
                 captura,
@@ -6607,7 +6712,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await safe_query_edit_message(
             query,
-            "🛡️ <b>CONTROL TOTAL · MODERACIÓN 7/7</b>\n\n"
+            "🛡️ <b>CONTROL TOTAL · MODERACIÓN 12/12</b>\n\n"
             + cabecera_identidad_orma(captura, rol=rol)
             + "\n\nSelecciona una acción. Después podrás elegir "
               "un grupo, varios grupos o los 7.",
@@ -6648,7 +6753,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             f"{texto_accion_moderacion(accion)} · <b>SELECCIONAR GRUPOS</b>\n\n"
             + cabecera_identidad_orma(captura)
-            + "\n\nSelecciona uno, varios o TODOS 7/7.",
+            + "\n\nSelecciona uno, varios o TODOS 12/12.",
             parse_mode="HTML",
             reply_markup=teclado_seleccion_moderacion(
                 captura_id,
@@ -6685,14 +6790,14 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, captura_txt, accion = data.split(":", 2)
         captura_id = int(captura_txt)
         estado = seleccion_moderacion_orma(usuario.id, captura_id, accion)
-        estado["grupos"] = set(range(1, 8))
-        await query.answer("Seleccionados 7/7")
+        estado["grupos"] = set(range(1, TOTAL_GRUPOS_OBLIGATORIOS + 1))
+        await query.answer("Seleccionados 12/12")
         captura = obtener_captura_orma(captura_id)
         await safe_query_edit_message(
             query,
             f"{texto_accion_moderacion(accion)} · <b>SELECCIONAR GRUPOS</b>\n\n"
             + cabecera_identidad_orma(captura)
-            + "\n\nSeleccionados: <b>7/7</b>",
+            + "\n\nSeleccionados: <b>12/12</b>",
             parse_mode="HTML",
             reply_markup=teclado_seleccion_moderacion(
                 captura_id, accion, estado["grupos"]
@@ -7112,7 +7217,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "restringido el texto simple en los grupos controlados: sus "
                 "mensajes de texto puro serán eliminados y recibirá el acceso "
                 "a <b>Membresía Publicitaria</b>.\n\n"
-                "No afecta a ningún otro usuario ni modifica la raíz 7/7."
+                "No afecta a ningún otro usuario ni modifica la raíz 12/12."
             )
             boton = InlineKeyboardButton(
                 "🔒 ACTIVAR Y EXIGIR MEMBRESÍA",
@@ -7331,7 +7436,7 @@ async def control_anti_evasion_spam(
     - mensajes enviados vía un bot externo (via_bot);
     - guest_message / guest bot caller no autorizado (PTB 22.8+).
 
-    No altera /orma, CLIENTES EDITADOS, membresía 7/7 ni límites.
+    No altera /orma, CLIENTES EDITADOS, membresía 12/12 ni límites.
     """
     mensaje = update.effective_message
     chat = update.effective_chat
@@ -7495,7 +7600,7 @@ async def control_publicidad_individual_grupos(
         username = usuario.username
         nombre = nombre_visible_usuario(usuario)
 
-        # La membresía 7/7 sigue siendo la primera puerta cuando está activa.
+        # La membresía 12/12 sigue siendo la primera puerta cuando está activa.
         if config_raiz_activa("membresia_7de7_activa"):
             estado = await obtener_estado_membresia_7de7(usuario.id)
             if not estado["completo"]:
@@ -7871,7 +7976,7 @@ async def control_comandos_exclusivos_raiz(
 ):
     """Solo el administrador y bots oficiales de raíz pueden usar /comandos.
 
-    Esta barrera es independiente de la membresía 7/7: incluso un usuario 7/7
+    Esta barrera es independiente de la membresía 12/12: incluso un usuario 12/12
     queda bloqueado si intenta ejecutar cualquier comando que empiece con '/'.
     """
     mensaje = update.effective_message
@@ -7920,7 +8025,7 @@ async def control_membresia_grupos(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    """Puerta raíz 7/7 universal para cualquier mensaje de grupo.
+    """Puerta raíz 12/12 universal para cualquier mensaje de grupo.
 
     Se ejecuta antes de los handlers de comandos y de publicidad. /orma queda
     expresamente protegido para conservar su flujo administrativo existente.
@@ -7938,7 +8043,7 @@ async def control_membresia_grupos(
         return
 
     # /orma es una herramienta administrativa protegida y conserva exactamente
-    # su handler actual. La puerta 7/7 no lo intercepta.
+    # su handler actual. La puerta 12/12 no lo intercepta.
     texto = str(getattr(mensaje, "text", "") or "").strip()
     comando = texto.split(maxsplit=1)[0].lower() if texto.startswith("/") else ""
     if comando in {
@@ -7952,7 +8057,7 @@ async def control_membresia_grupos(
 
     # Telegram puede entregar publicaciones hechas en nombre de un canal/chat
     # sin effective_user. Esa identidad no puede acreditar una membresía personal
-    # 7/7 y ya no queda fuera de la barrera por un simple `not usuario`.
+    # 12/12 y ya no queda fuera de la barrera por un simple `not usuario`.
     sender_chat = getattr(mensaje, "sender_chat", None)
     if usuario is None:
         if sender_chat is None:
@@ -7977,7 +8082,7 @@ async def control_membresia_grupos(
             )
         except Exception:
             logging.exception(
-                "7/7 no pudo auditar sender_chat=%s chat=%s message=%s estado=%s",
+                "12/12 no pudo auditar sender_chat=%s chat=%s message=%s estado=%s",
                 identidad_id,
                 chat.id,
                 mensaje.message_id,
@@ -7992,7 +8097,7 @@ async def control_membresia_grupos(
         raise ApplicationHandlerStop
 
     # ÚNICA EXCEPCIÓN estructural: bots oficiales definidos de raíz.
-    # Todo lo demás (usuarios, administradores y bots externos) cumple 7/7.
+    # Todo lo demás (usuarios, administradores y bots externos) cumple 12/12.
     if es_bot_oficial_exento(usuario):
         return
 
@@ -8022,7 +8127,7 @@ async def control_membresia_grupos(
         )
     except Exception:
         logging.exception(
-            "7/7 no pudo persistir auditoría user=%s chat=%s message=%s estado=%s",
+            "12/12 no pudo persistir auditoría user=%s chat=%s message=%s estado=%s",
             usuario.id,
             chat.id,
             mensaje.message_id,
@@ -8401,7 +8506,29 @@ async def union_membresia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def union_grupos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.effective_message.reply_text('DIAGNOSTICO VERSION f37437b')
+    usuario = update.effective_user
+    mensaje = update.effective_message
+
+    if not usuario or not mensaje:
+        return
+
+    registrar_usuario_membresia(
+        usuario,
+        union_bot_iniciado=True,
+    )
+
+    estado = await obtener_estado_membresia_7de7(usuario.id)
+    registrar_verificacion_membresia_db(usuario.id, estado)
+
+    enviado = await mensaje.reply_text(
+        texto_union_membresia(estado),
+        parse_mode="HTML",
+        reply_markup=teclado_union_membresia(estado),
+    )
+    guardar_union_panel_message_id(
+        usuario.id,
+        enviado.message_id,
+    )
 
 
 async def union_verificar_callback(
@@ -8414,7 +8541,7 @@ async def union_verificar_callback(
     if not query or not usuario:
         return
 
-    await query.answer("Verificando los 7 grupos…")
+    await query.answer("Verificando los 12 grupos…")
 
     registrar_usuario_membresia(
         usuario,
@@ -8663,8 +8790,8 @@ async def main():
 
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")
-    logging.info("Membresía obligatoria configurada: 7/7.")
-    logging.info("Regla 7/7 universal activa en los 7 grupos oficiales.")
+    logging.info("Membresía obligatoria configurada: 12/12.")
+    logging.info("Regla 12/12 universal activa en los 12 grupos oficiales.")
     logging.info("Registro de actividad y movimientos del Bloque 3 activo.")
     logging.info("Control Publicitario Individual del Bloque 4 activo.")
     logging.info("Bots oficiales exentos de raíz: %s", sorted(BOTS_OFICIALES_EXENTOS))

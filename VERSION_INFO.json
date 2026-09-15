@@ -1,44 +1,41 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.11",
-  "status": "CANDIDATE_CORREGIDO_LOCAL",
-  "base_backup": "R058",
-  "base_version": "1.0.9",
-  "base_commit": "4921ad0b4e13bee275c4850beb96fba80b722129",
+  "version": "1.0.12",
+  "status": "CANDIDATE_LOCAL",
+  "base_version": "1.0.11",
+  "base_commit": "3ffcb874817330e05677dd810687b16001d0ca57",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "BARRERA 7/7 UNIVERSAL + COMANDOS EXCLUSIVOS DE RAÍZ",
+  "title": "AMPLIACION MEMBRESIA 7/7 + 5/5 = 12/12",
   "live_validation": "PENDING_JUSTRUNMY_TEST",
-  "scope_lock": "RAIZ_MEMBRESIA_7DE7_UNIVERSAL_SIN_BYPASS",
+  "scope_lock": "AMPLIACION_12_GRUPOS_COMPATIBLE_CON_HISTORICO_7DE7",
   "changes": [
-    "La puerta 7/7 procesa todos los mensajes de grupos controlados, incluidos comandos Telegram, reenviados y captions, sin depender de ~filters.COMMAND",
-    "Proteger expresamente /orma para conservar intacto su flujo administrativo actual",
-    "Mover la puerta 7/7 al grupo -5, después de anti-evasión (-10) y antes de CommandHandler/publicidad",
-    "Bloquear y auditar sender_chat/canal cuando Telegram no entrega effective_user, evitando el bypass por publicación como canal/chat",
-    "Mantener la excepción estructural de bots oficiales de raíz, incluido @GroupAnonymousBot",
-    "Aplicar doble intento de eliminación también a la barrera anti-evasión externa",
-    "MaximoControlGroup deja de descartar updates pendientes durante reinicios; UnionMembresia conserva su comportamiento previo",
-    "No bloquear, banear ni restringir usuarios por la regla 7/7; solo retirar el mensaje y mostrar el aviso vigente",
-    "Agregar barrera de comandos independiente de 7/7: ningún usuario puede ejecutar mensajes/captions que empiecen con / aunque tenga membresía 7/7",
-    "Autorizar comandos únicamente al administrador de Máximo y a bots oficiales exentos de raíz",
-    "Bloquear también /orma, /m, /comando@OtroBot y cualquier otro /comando cuando provenga de un usuario no autorizado",
-    "Usar doble intento de eliminación y ApplicationHandlerStop para cortar el update antes de handlers posteriores",
-    "Mantener /orma y demás comandos intactos para el administrador autorizado y bots oficiales de raíz"
+    "Ampliar los grupos oficiales obligatorios de 7 a 12",
+    "Incorporar los grupos oficiales 8, 9, 10, 11 y 12 con sus respectivos HelpDesk",
+    "Mantener intacta la base historica de los grupos 1-7",
+    "Registrar independientemente la expansion de los grupos 8-12 como 5/5",
+    "Exigir 7/7 + 5/5 para considerar completa la membresia 12/12",
+    "Preservar alcanzo_7de7 y perdio_grupos como historial previo",
+    "Agregar historial independiente de alcanzo_5de5, alcanzo_12de12 y perdio_12de12",
+    "Ampliar /orma y Ficha Avanzada para operar sobre los 12 grupos",
+    "Actualizar controles de raiz, moderacion y publicidad de 7/7 a 12/12",
+    "Restaurar /grupos de UnionMembresia eliminando el stub de diagnostico",
+    "Mantener los bots HelpDesk oficiales exentos de la barrera de raiz"
   ],
   "database_migration": [
-    "Sin cambios de esquema: reutiliza eventos_membresia_7de7 existente para auditar sender_chat mediante decision=BLOQUEADA_SENDER_CHAT_7DE7"
+    "Agregar campos de compatibilidad para base 7/7, expansion 5/5 y total 12/12",
+    "Crear snapshot unico del estado historico 7/7 antes de comenzar la operacion 12/12",
+    "No eliminar ni reiniciar usuarios, verificaciones, grupos, auditorias ni historicos existentes"
   ],
   "protected_unchanged": [
-    "/orma y su handler/callback/navegación",
-    "CONTROL PUBLICITARIO",
-    "detección publicitaria y reglas PUBLICIDAD/DÍA=0",
-    "límites y contadores independientes por grupo",
-    "7 grupos oficiales y grupo de pruebas",
-    "bots oficiales exentos de raíz",
-    "paneles y navegación privados",
-    "agente de respaldo, Dockerfile y requirements.txt",
-    "datos existentes de maximo_control.db"
+    "Historial previo de membresia 7/7",
+    "CONTROL PUBLICITARIO y contadores existentes",
+    "Grupo de pruebas",
+    "datos existentes de maximo_control.db",
+    "Dockerfile",
+    "agente_respaldo_remoto.py",
+    "requirements.txt"
   ],
-  "updated_at": "19/08/2026 21:53:00"
+  "updated_at": "14/09/2026 20:32:21"
 }

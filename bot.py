@@ -184,7 +184,7 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.14"
+APP_VERSION = "1.0.15"
 APP_VERSION_TITULO = "SUPERVISIÓN FILTRADA · SOLO MENSAJES QUE SUPERAN CONTROLES"
 APP_VERSION_FECHA = "29/09/2026 19:50:00"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
@@ -7578,17 +7578,10 @@ async def replicar_actividad_humana_supervision(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    """Replica pasivamente toda actividad no exenta de los 12 grupos oficiales.
-
-    El destino de supervisión no forma parte de la membresía 12/12. Esta capa no
-    elimina, restringe ni modifica el mensaje original; únicamente deja una copia
-    auditable para revisión administrativa.
-    """
+    """Replica solo actividad humana que supera 12/12 y controles previos."""
     mensaje = update.effective_message
     chat = update.effective_chat
 
-    # R015: si un control anterior ya determinó que este mensaje debe quedar
-    # bloqueado, no debe contaminar el grupo de supervisión.
     if context.chat_data.pop(f"supervision_bloqueada:{getattr(mensaje, 'message_id', 0)}", False):
         return
 
@@ -7603,33 +7596,43 @@ async def replicar_actividad_humana_supervision(
     usuario = mensaje.from_user
     sender_chat = mensaje.sender_chat
 
-    # Los bots estructurales/autorizados no deben contaminar la supervisión.
     if usuario is not None and es_bot_oficial_exento(usuario):
         return
 
-    if usuario is not None:
-        identidad_tipo = "BOT" if usuario.is_bot else "USUARIO"
-        identidad_id = int(usuario.id)
-        username = usuario.username
-        nombre = nombre_visible_usuario(usuario)
-    elif sender_chat is not None:
-        identidad_tipo = "CANAL/CHAT"
-        identidad_id = int(sender_chat.id)
-        username = sender_chat.username
-        nombre = sender_chat.title or "Sin nombre visible"
-    else:
-        identidad_tipo = "DESCONOCIDA"
-        identidad_id = 0
-        username = None
-        nombre = "Sin identidad visible"
+    # R016: comprobación defensiva real de membresía en el instante de la captura.
+    # Solo una identidad humana 12/12 puede entrar en PUBLICIDAD NO IDENTIFICADA.
+    if usuario is None or usuario.is_bot:
+        return
+    estado_membresia = await obtener_estado_membresia_7de7(usuario.id)
+    if not estado_membresia.get("completo"):
+        return
 
+    identidad_tipo = "USUARIO"
+    identidad_id = int(usuario.id)
+    username = usuario.username
+    nombre = nombre_visible_usuario(usuario)
     usuario_txt = f"@{username}" if username else "Sin @username"
     fecha_peru = datetime.now(ZONA_PERU).strftime("%d/%m/%Y %H:%M:%S")
+
+    # Reutiliza la ficha /orma existente: no crea un segundo sistema de control.
+    captura_id = guardar_captura_orma(
+        ORMA_ADMIN_USER_ID or ADMIN_USER_ID,
+        identidad_tipo, identidad_id, username, nombre, False,
+        chat, mensaje.message_id,
+    )
+    teclado_supervision = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "🛡 CONTROL INDIVIDUAL /ORMA",
+            callback_data=f"orma_ficha:{captura_id}",
+        )
+    ]])
+
     cabecera = (
         "🔎 <b>ACTIVIDAD NO IDENTIFICADA</b>\n"
         f"👤 <b>Identidad:</b> {html.escape(str(nombre))}\n"
         f"🏷 <b>Usuario:</b> {html.escape(usuario_txt)}\n"
-        f"🆔 <b>{identidad_tipo} ID:</b> <code>{identidad_id}</code>\n"
+        f"🆔 <b>USUARIO ID:</b> <code>{identidad_id}</code>\n"
+        "✅ <b>Membresía:</b> 12/12 COMPLETA\n"
         f"📍 <b>Grupo:</b> {html.escape(str(chat.title or username_chat(chat) or chat.id))}\n"
         f"🆔 <b>Chat ID:</b> <code>{chat.id}</code>\n"
         f"💬 <b>Message ID:</b> <code>{mensaje.message_id}</code>\n"
@@ -7642,6 +7645,7 @@ async def replicar_actividad_humana_supervision(
             text=cabecera,
             parse_mode="HTML",
             disable_web_page_preview=True,
+            reply_markup=teclado_supervision,
         )
         await context.bot.copy_message(
             chat_id=GRUPO_PUBLICIDAD_NO_IDENTIFICADA_ID,
@@ -7651,10 +7655,7 @@ async def replicar_actividad_humana_supervision(
     except TelegramError:
         logging.exception(
             "Supervisión no pudo replicar chat=%s message=%s identidad=%s:%s",
-            chat.id,
-            mensaje.message_id,
-            identidad_tipo,
-            identidad_id,
+            chat.id, mensaje.message_id, identidad_tipo, identidad_id,
         )
 
 

@@ -1,36 +1,36 @@
 {
-  "project": "MaximoControlGroup_bot",
-  "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.15",
-  "status": "CANDIDATE_LOCAL",
-  "base_version": "1.0.14",
-  "base_commit": "11242d7693b3b3edd73a66eaf1e17456fc81dd6d",
-  "timezone": "America/Lima",
-  "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "SUPERVISION 12/12 + ACCESO DIRECTO /ORMA",
-  "live_validation": "PENDING_JUSTRUNMY_TEST",
-  "scope_lock": "SOLO_USUARIOS_12_DE_12_NO_RESTRINGIDOS_CON_ACCESO_ORMA",
-  "changes": [
-    "Verificar defensivamente membresia real 12/12 antes de replicar una actividad al grupo PUBLICIDAD NO IDENTIFICADA",
-    "Mostrar explicitamente Membresia: 12/12 COMPLETA en la ficha de supervision",
-    "Agregar boton CONTROL INDIVIDUAL /ORMA reutilizando la ficha y controles /orma existentes para la identidad detectada",
-    "Mantener fuera de supervision mensajes bloqueados por membresia o por control publicitario individual",
-    "Mantener excluidos bots oficiales y no alterar los 12 grupos, moderacion ni controles existentes"
-  ],
-  "database_migration": [
-    "Agregar campos de compatibilidad para base 7/7, expansion 5/5 y total 12/12",
-    "Crear snapshot unico del estado historico 7/7 antes de comenzar la operacion 12/12",
-    "No eliminar ni reiniciar usuarios, verificaciones, grupos, auditorias ni historicos existentes"
-  ],
-  "protected_unchanged": [
-    "Puerta de membresía 12/12",
-    "CONTROL PUBLICITARIO y contadores existentes",
-    "Moderación y anti-evasión existentes",
-    "Grupo de pruebas",
-    "datos existentes de maximo_control.db",
-    "Dockerfile",
-    "agente_respaldo_remoto.py",
-    "requirements.txt"
-  ],
-  "updated_at": "29/09/2026 20:05:00"
+    "project":  "MaximoControlGroup_bot",
+    "telegram_bot":  "@MaximoControlGroup_bot",
+    "version":  "1.0.13",
+    "status":  "FINAL",
+    "base_version":  "1.0.12",
+    "base_commit":  "355c18c9517aedd4c7867bfe365ba92c9817755a",
+    "timezone":  "America/Lima",
+    "date_format":  "DD/MM/YYYY HH:mm:ss",
+    "title":  "SUPERVISION 12/12 + ACCESO DIRECTO /ORMA",
+    "live_validation":  "APPROVED_JUSTRUNMY_TEST",
+    "scope_lock":  "SOLO_USUARIOS_12_DE_12_NO_RESTRINGIDOS_CON_ACCESO_ORMA",
+    "changes":  [
+                    "Verificar defensivamente membresia real 12/12 antes de replicar una actividad al grupo PUBLICIDAD NO IDENTIFICADA",
+                    "Mostrar explicitamente Membresia: 12/12 COMPLETA en la ficha de supervision",
+                    "Agregar boton CONTROL INDIVIDUAL /ORMA reutilizando la ficha y controles /orma existentes para la identidad detectada",
+                    "Mantener fuera de supervision mensajes bloqueados por membresia o por control publicitario individual",
+                    "Mantener excluidos bots oficiales y no alterar los 12 grupos, moderacion ni controles existentes"
+                ],
+    "database_migration":  [
+                               "Agregar campos de compatibilidad para base 7/7, expansion 5/5 y total 12/12",
+                               "Crear snapshot unico del estado historico 7/7 antes de comenzar la operacion 12/12",
+                               "No eliminar ni reiniciar usuarios, verificaciones, grupos, auditorias ni historicos existentes"
+                           ],
+    "protected_unchanged":  [
+                                "Puerta de membresía 12/12",
+                                "CONTROL PUBLICITARIO y contadores existentes",
+                                "Moderación y anti-evasión existentes",
+                                "Grupo de pruebas",
+                                "datos existentes de maximo_control.db",
+                                "Dockerfile",
+                                "agente_respaldo_remoto.py",
+                                "requirements.txt"
+                            ],
+    "updated_at":  "29/09/2026 20:05:00"
 }

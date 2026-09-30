@@ -184,9 +184,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.13"
-APP_VERSION_TITULO = "SUPERVISIÓN PASIVA · PUBLICIDAD NO IDENTIFICADA"
-APP_VERSION_FECHA = "29/09/2026 19:15:00"
+APP_VERSION = "1.0.14"
+APP_VERSION_TITULO = "SUPERVISIÓN FILTRADA · SOLO MENSAJES QUE SUPERAN CONTROLES"
+APP_VERSION_FECHA = "29/09/2026 19:50:00"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -7587,6 +7587,11 @@ async def replicar_actividad_humana_supervision(
     mensaje = update.effective_message
     chat = update.effective_chat
 
+    # R015: si un control anterior ya determinó que este mensaje debe quedar
+    # bloqueado, no debe contaminar el grupo de supervisión.
+    if context.chat_data.pop(f"supervision_bloqueada:{getattr(mensaje, 'message_id', 0)}", False):
+        return
+
     if (
         not mensaje
         or not chat
@@ -7724,6 +7729,7 @@ async def control_publicidad_individual_grupos(
         return
 
     if tipo_contenido == "TEXTO SIMPLE" and usuario is not None:
+        context.chat_data[f"supervision_bloqueada:{mensaje.message_id}"] = True
         eliminado, estado_eliminacion = await eliminar_publicidad_estricta(
             context, mensaje, chat, identidad_id
         )
@@ -7765,6 +7771,7 @@ async def control_publicidad_individual_grupos(
         )
         return
 
+    context.chat_data[f"supervision_bloqueada:{mensaje.message_id}"] = True
     eliminado, estado_eliminacion = await eliminar_publicidad_estricta(
         context, mensaje, chat, identidad_id
     )
@@ -8794,12 +8801,14 @@ async def main():
         TypeHandler(Update, control_anti_evasion_spam),
         group=-10,
     )
+    # R015: supervisión después de membresía y control publicitario. Los mensajes
+    # ya bloqueados no se replican; solo llegan los que superaron los controles.
     maximo_app.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS,
             replicar_actividad_humana_supervision,
         ),
-        group=-9,
+        group=6,
     )
     maximo_app.add_handler(
         MessageHandler(

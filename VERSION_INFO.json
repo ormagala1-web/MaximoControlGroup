@@ -1,22 +1,21 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "status": "CANDIDATE_LOCAL",
-  "base_version": "1.0.12",
-  "base_commit": "355c18c9517aedd4c7867bfe365ba92c9817755a",
+  "base_version": "1.0.13",
+  "base_commit": "39c813cd505e31de652014cc637bed6df7062a5c",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "SUPERVISION PASIVA · PUBLICIDAD NO IDENTIFICADA",
+  "title": "SUPERVISIÓN FILTRADA · SOLO MENSAJES QUE SUPERAN CONTROLES",
   "live_validation": "PENDING_JUSTRUNMY_TEST",
-  "scope_lock": "CAPTURA_TOTAL_12_GRUPOS_SIN_ALTERAR_CONTROLES_EXISTENTES",
+  "scope_lock": "REPLICAR_SOLO_MENSAJES_QUE_SUPERAN_MEMBRESIA_Y_CONTROL_PUBLICITARIO",
   "changes": [
-    "Agregar grupo privado de supervisión PUBLICIDAD NO IDENTIFICADA (-1004406356313) exclusivamente como destino receptor",
-    "Replicar toda actividad de mensajes no exenta originada en los 12 grupos oficiales, incluyendo texto y contenido multimedia soportado por copy_message",
-    "Excluir bots oficiales/autorizados mediante la misma lista estructural existente BOTS_OFICIALES_EXENTOS",
-    "Adjuntar identidad, user_id/sender_chat_id, grupo, chat_id, message_id y fecha/hora America/Lima",
-    "Mantener la función completamente pasiva: no elimina, restringe ni modifica mensajes o usuarios",
-    "Mantener el grupo de supervisión fuera de membresía: el requisito continúa exactamente en 12/12"
+    "Mover la supervisión después de la puerta de membresía 12/12 y del control publicitario individual",
+    "No replicar mensajes eliminados o bloqueados por falta de membresía 12/12",
+    "No replicar mensajes eliminados o bloqueados por restricciones/límites del CONTROL PUBLICITARIO",
+    "Replicar únicamente actividad que haya superado los controles existentes, manteniendo captura total de su contenido",
+    "Mantener exclusión de bots oficiales/autorizados y el grupo -1004406356313 fuera de membresía"
   ],
   "database_migration": [
     "Agregar campos de compatibilidad para base 7/7, expansion 5/5 y total 12/12",
@@ -33,5 +32,5 @@
     "agente_respaldo_remoto.py",
     "requirements.txt"
   ],
-  "updated_at": "29/09/2026 19:15:00"
+  "updated_at": "29/09/2026 19:50:00"
 }

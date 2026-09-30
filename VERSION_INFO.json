@@ -1,27 +1,22 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "status": "CANDIDATE_LOCAL",
-  "base_version": "1.0.11",
-  "base_commit": "3ffcb874817330e05677dd810687b16001d0ca57",
+  "base_version": "1.0.12",
+  "base_commit": "355c18c9517aedd4c7867bfe365ba92c9817755a",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "AMPLIACION MEMBRESIA 7/7 + 5/5 = 12/12",
+  "title": "SUPERVISION PASIVA · PUBLICIDAD NO IDENTIFICADA",
   "live_validation": "PENDING_JUSTRUNMY_TEST",
-  "scope_lock": "AMPLIACION_12_GRUPOS_COMPATIBLE_CON_HISTORICO_7DE7",
+  "scope_lock": "CAPTURA_TOTAL_12_GRUPOS_SIN_ALTERAR_CONTROLES_EXISTENTES",
   "changes": [
-    "Ampliar los grupos oficiales obligatorios de 7 a 12",
-    "Incorporar los grupos oficiales 8, 9, 10, 11 y 12 con sus respectivos HelpDesk",
-    "Mantener intacta la base historica de los grupos 1-7",
-    "Registrar independientemente la expansion de los grupos 8-12 como 5/5",
-    "Exigir 7/7 + 5/5 para considerar completa la membresia 12/12",
-    "Preservar alcanzo_7de7 y perdio_grupos como historial previo",
-    "Agregar historial independiente de alcanzo_5de5, alcanzo_12de12 y perdio_12de12",
-    "Ampliar /orma y Ficha Avanzada para operar sobre los 12 grupos",
-    "Actualizar controles de raiz, moderacion y publicidad de 7/7 a 12/12",
-    "Restaurar /grupos de UnionMembresia eliminando el stub de diagnostico",
-    "Mantener los bots HelpDesk oficiales exentos de la barrera de raiz"
+    "Agregar grupo privado de supervisión PUBLICIDAD NO IDENTIFICADA (-1004406356313) exclusivamente como destino receptor",
+    "Replicar toda actividad de mensajes no exenta originada en los 12 grupos oficiales, incluyendo texto y contenido multimedia soportado por copy_message",
+    "Excluir bots oficiales/autorizados mediante la misma lista estructural existente BOTS_OFICIALES_EXENTOS",
+    "Adjuntar identidad, user_id/sender_chat_id, grupo, chat_id, message_id y fecha/hora America/Lima",
+    "Mantener la función completamente pasiva: no elimina, restringe ni modifica mensajes o usuarios",
+    "Mantener el grupo de supervisión fuera de membresía: el requisito continúa exactamente en 12/12"
   ],
   "database_migration": [
     "Agregar campos de compatibilidad para base 7/7, expansion 5/5 y total 12/12",
@@ -29,13 +24,14 @@
     "No eliminar ni reiniciar usuarios, verificaciones, grupos, auditorias ni historicos existentes"
   ],
   "protected_unchanged": [
-    "Historial previo de membresia 7/7",
+    "Puerta de membresía 12/12",
     "CONTROL PUBLICITARIO y contadores existentes",
+    "Moderación y anti-evasión existentes",
     "Grupo de pruebas",
     "datos existentes de maximo_control.db",
     "Dockerfile",
     "agente_respaldo_remoto.py",
     "requirements.txt"
   ],
-  "updated_at": "14/09/2026 20:32:21"
+  "updated_at": "29/09/2026 19:15:00"
 }

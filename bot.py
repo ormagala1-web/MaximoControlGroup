@@ -113,6 +113,7 @@ UNION_BOT_USERNAME = "UnionMembresia_bot"
 GRUPO_PRUEBAS_USERNAME = "Orma_Pruebas"
 ZONA_PERU = ZoneInfo("America/Lima")
 GRUPO_PUBLICIDAD_NO_IDENTIFICADA_ID = -1004406356313
+GRUPO_PUBLICACIONES_USUARIOS_ID = -1004410994552
 
 GRUPOS_OFICIALES = [
     (1, "DISTRITO STREAMING UNIVERSAL 🌎🌍", "DistritoStreamingUniversal", "DistritoStreamingUniversal_Bot"),
@@ -184,9 +185,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.13"
-APP_VERSION_TITULO = "SUPERVISIÓN FILTRADA · SOLO MENSAJES QUE SUPERAN CONTROLES"
-APP_VERSION_FECHA = "29/09/2026 19:50:00"
+APP_VERSION = "1.0.14"
+APP_VERSION_TITULO = "PUBLICACIONES RESTRINGIDAS · MEMBRESÍA DINÁMICA + /ORMA"
+APP_VERSION_FECHA = "29/09/2026 21:40:00"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -7659,6 +7660,76 @@ async def replicar_actividad_humana_supervision(
         )
 
 
+async def replicar_publicacion_restringida(
+    context,
+    mensaje,
+    chat,
+    usuario,
+    estado_membresia,
+    motivo,
+):
+    """R020: replica al grupo privado solo mensajes de usuarios que serán restringidos."""
+    if not mensaje or not chat or usuario is None or getattr(usuario, "is_bot", False):
+        return
+
+    identidad_id = int(usuario.id)
+    username = usuario.username
+    nombre = nombre_visible_usuario(usuario)
+    usuario_txt = f"@{username}" if username else "Sin @username"
+    fecha_peru = datetime.now(ZONA_PERU).strftime("%d/%m/%Y %H:%M:%S")
+
+    completados = len((estado_membresia or {}).get("completados") or [])
+    total = int((estado_membresia or {}).get("total") or TOTAL_GRUPOS_OBLIGATORIOS)
+    progreso = f"{completados}/{total}"
+    if (estado_membresia or {}).get("completo"):
+        progreso += " COMPLETA"
+
+    captura_id = guardar_captura_orma(
+        ORMA_ADMIN_USER_ID or ADMIN_USER_ID,
+        "USUARIO", identidad_id, username, nombre, False,
+        chat, mensaje.message_id,
+    )
+    teclado = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "🛡 CONTROL INDIVIDUAL /ORMA",
+            callback_data=f"orma_ficha:{captura_id}",
+        )
+    ]])
+
+    cabecera = (
+        "🔴 <b>PUBLICACIÓN RESTRINGIDA</b>\n"
+        f"👤 <b>Identidad:</b> {html.escape(str(nombre))}\n"
+        f"🏷 <b>Usuario:</b> {html.escape(usuario_txt)}\n"
+        f"🆔 <b>USUARIO ID:</b> <code>{identidad_id}</code>\n"
+        f"✅ <b>Membresía:</b> {html.escape(progreso)}\n"
+        f"📍 <b>Grupo:</b> {html.escape(str(chat.title or username_chat(chat) or chat.id))}\n"
+        f"🆔 <b>Chat ID:</b> <code>{chat.id}</code>\n"
+        f"💬 <b>Message ID:</b> <code>{mensaje.message_id}</code>\n"
+        f"🛡 <b>Motivo:</b> {html.escape(str(motivo or 'RESTRINGIDA'))}\n"
+        f"🕐 <b>Fecha:</b> {fecha_peru}"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=GRUPO_PUBLICACIONES_USUARIOS_ID,
+            text=cabecera,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=teclado,
+        )
+        # Copiar antes de que el flujo existente elimine el mensaje original.
+        await context.bot.copy_message(
+            chat_id=GRUPO_PUBLICACIONES_USUARIOS_ID,
+            from_chat_id=chat.id,
+            message_id=mensaje.message_id,
+        )
+    except TelegramError:
+        logging.exception(
+            "R020 no pudo replicar restringida chat=%s message=%s user=%s",
+            chat.id, mensaje.message_id, identidad_id,
+        )
+
+
 async def control_publicidad_individual_grupos(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -7731,6 +7802,11 @@ async def control_publicidad_individual_grupos(
 
     if tipo_contenido == "TEXTO SIMPLE" and usuario is not None:
         context.chat_data[f"supervision_bloqueada:{mensaje.message_id}"] = True
+        estado_supervision = await obtener_estado_membresia_7de7(usuario.id)
+        await replicar_publicacion_restringida(
+            context, mensaje, chat, usuario, estado_supervision,
+            "EXCEPCIÓN INDIVIDUAL · MEMBRESÍA PUBLICITARIA REQUERIDA",
+        )
         eliminado, estado_eliminacion = await eliminar_publicidad_estricta(
             context, mensaje, chat, identidad_id
         )
@@ -7773,6 +7849,11 @@ async def control_publicidad_individual_grupos(
         return
 
     context.chat_data[f"supervision_bloqueada:{mensaje.message_id}"] = True
+    if usuario is not None and not usuario.is_bot:
+        estado_supervision = await obtener_estado_membresia_7de7(usuario.id)
+        await replicar_publicacion_restringida(
+            context, mensaje, chat, usuario, estado_supervision, motivo,
+        )
     eliminado, estado_eliminacion = await eliminar_publicidad_estricta(
         context, mensaje, chat, identidad_id
     )
@@ -8194,6 +8275,15 @@ async def control_membresia_grupos(
 
     if estado["completo"]:
         return
+
+    await replicar_publicacion_restringida(
+        context,
+        mensaje,
+        chat,
+        usuario,
+        estado,
+        "MEMBRESÍA 12/12 INCOMPLETA",
+    )
 
     eliminado, estado_eliminacion, error_eliminacion = (
         await eliminar_mensaje_membresia_7de7_estricto(

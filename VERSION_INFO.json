@@ -1,30 +1,32 @@
-{
-  "project": "MaximoControlGroup_bot",
-  "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.15",
-  "status": "CANDIDATE",
-  "base_version": "1.0.14",
-  "base_commit": "1972f0a6321172f22da74ac3d25c3329c96107ce",
-  "timezone": "America/Lima",
-  "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "PRUEBA · ELIMINACIÓN DE MENSAJE DE ORIGEN",
-  "live_validation": "PENDING_JUSTRUNMY_TEST",
-  "scope_lock": "SOLO_SUPERVISION_INVERSA_SIN_ALTERAR_CONTROLES_EXISTENTES",
-  "changes": [
-    "Botón debajo de /ORMA para borrar únicamente el mensaje de origen desde PUBLICIDAD NO IDENTIFICADA",
-    "Autorización por ID administrativo, auditoría y conservación de copia",
-    "Sin cambios en membresía, replicación, límites ni reglas existentes"
-  ],
-  "database_migration": [],
-  "protected_unchanged": [
-    "Puerta de membresÃ­a 12/12",
-    "CONTROL PUBLICITARIO y contadores existentes",
-    "ModeraciÃ³n y anti-evasiÃ³n existentes",
-    "Grupo de pruebas",
-    "datos existentes de maximo_control.db",
-    "Dockerfile",
-    "agente_respaldo_remoto.py",
-    "requirements.txt"
-  ],
-  "updated_at": "29/09/2026 21:40:00"
+﻿{
+    "project":  "MaximoControlGroup_bot",
+    "telegram_bot":  "@MaximoControlGroup_bot",
+    "version":  "1.0.15",
+    "status":  "APPROVED",
+    "base_version":  "1.0.14",
+    "base_commit":  "1972f0a6321172f22da74ac3d25c3329c96107ce",
+    "timezone":  "America/Lima",
+    "date_format":  "DD/MM/YYYY HH:mm:ss",
+    "title":  "ELIMINACIÓN DE MENSAJE DE ORIGEN",
+    "live_validation":  "VALIDATED_JUSTRUNMY_3_GROUPS",
+    "scope_lock":  "SOLO_SUPERVISION_INVERSA_SIN_ALTERAR_CONTROLES_EXISTENTES",
+    "changes":  [
+                    "Botón debajo de /ORMA para borrar únicamente el mensaje de origen desde PUBLICIDAD NO IDENTIFICADA",
+                    "Autorización por ID administrativo, auditoría y conservación de copia",
+                    "Sin cambios en membresía, replicación, límites ni reglas existentes"
+                ],
+    "database_migration":  [
+
+                           ],
+    "protected_unchanged":  [
+                                "Puerta de membresÃ­a 12/12",
+                                "CONTROL PUBLICITARIO y contadores existentes",
+                                "ModeraciÃ³n y anti-evasiÃ³n existentes",
+                                "Grupo de pruebas",
+                                "datos existentes de maximo_control.db",
+                                "Dockerfile",
+                                "agente_respaldo_remoto.py",
+                                "requirements.txt"
+                            ],
+    "updated_at":  "01/10/2026 10:35:41"
 }

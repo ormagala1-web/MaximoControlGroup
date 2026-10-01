@@ -1,0 +1,11 @@
+MÁXIMO CONTROL GROUP — 1.0.15 PRUEBA
+
+Cambio: botón ELIMINAR ESTE MENSAJE debajo de /ORMA, solamente en las nuevas cabeceras de PUBLICIDAD NO IDENTIFICADA. Elimina el mensaje de origen con sus IDs guardados; conserva la copia. Acceso exclusivo a ADMIN_USER_ID y ORMA_ADMIN_USER_ID configurados. Registra resultado en auditoria_orma_acciones. Un resultado previamente confirmado evita repetir el borrado tras reiniciar.
+
+No cambia la membresía, exclusiones, controles publicitarios, replicación ni moderación. Dockerfile, agente de respaldo y requirements son idénticos al respaldo 1.0.14. No incluye ni restaura maximo_control.db. No aplica botones retroactivamente a cabeceras antiguas.
+
+Versión candidata: pruebas locales con Telegram simulado, no validación en servidor. Se verificaron autorización, destino, captura inexistente, error de Telegram, IDs exactos de origen, auditoría, conservación de /ORMA, repetición y mensajes independientes. Sintaxis Python correcta.
+
+Validación en JustRunMy: publicar dos mensajes desde usuario con 12/12, comprobar ambos botones, borrar uno y verificar que solo desaparece ese original, conservar copia y /ORMA, comprobar segundo botón. Revisar rechazo sin permisos y mensaje de más de 48 horas. Verificar persistencia después de reiniciar. GitHub y Oracle solo después de aprobación.
+
+Limitaciones: borrado con permisos administrativos y menos de 48 horas según Telegram. Los mensajes de un álbum son mensajes individuales. No se corrigen en esta versión los hallazgos ajenos al cambio: secreto literal heredado en Dockerfile, errores de membresía y reintentos de eliminación preexistentes.

@@ -1,28 +1,21 @@
-﻿{
+{
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "status": "CANDIDATE",
-  "base_version": "1.0.13",
-  "base_commit": "58889363ca86d1471c67b05ce0f48fe9f810d5c7",
+  "base_version": "1.0.14",
+  "base_commit": "1972f0a6321172f22da74ac3d25c3329c96107ce",
   "timezone": "America/Lima",
   "date_format": "DD/MM/YYYY HH:mm:ss",
-  "title": "PUBLICACIONES USUARIOS Â· RESTRINGIDAS + MEMBRESÃA DINÃMICA + /ORMA",
+  "title": "PRUEBA · ELIMINACIÓN DE MENSAJE DE ORIGEN",
   "live_validation": "PENDING_JUSTRUNMY_TEST",
   "scope_lock": "SOLO_SUPERVISION_INVERSA_SIN_ALTERAR_CONTROLES_EXISTENTES",
   "changes": [
-    "Agregar grupo privado PUBLICACIONES USUARIOS con chat_id -1004410994552",
-    "Replicar antes de eliminar los mensajes de usuarios restringidos por membresÃ­a 12/12 incompleta",
-    "Replicar antes de eliminar publicidad o texto restringido por el control publicitario existente",
-    "Mostrar membresÃ­a real dinÃ¡mica N/12 y 12/12 COMPLETA",
-    "Reutilizar CONTROL INDIVIDUAL /ORMA mediante guardar_captura_orma y orma_ficha existentes",
-    "Mantener intacto PUBLICIDAD NO IDENTIFICADA y la lÃ³gica actual de eliminaciÃ³n, lÃ­mites y avisos"
+    "Botón debajo de /ORMA para borrar únicamente el mensaje de origen desde PUBLICIDAD NO IDENTIFICADA",
+    "Autorización por ID administrativo, auditoría y conservación de copia",
+    "Sin cambios en membresía, replicación, límites ni reglas existentes"
   ],
-  "database_migration": [
-    "Agregar campos de compatibilidad para base 7/7, expansion 5/5 y total 12/12",
-    "Crear snapshot unico del estado historico 7/7 antes de comenzar la operacion 12/12",
-    "No eliminar ni reiniciar usuarios, verificaciones, grupos, auditorias ni historicos existentes"
-  ],
+  "database_migration": [],
   "protected_unchanged": [
     "Puerta de membresÃ­a 12/12",
     "CONTROL PUBLICITARIO y contadores existentes",
@@ -35,4 +28,3 @@
   ],
   "updated_at": "29/09/2026 21:40:00"
 }
-

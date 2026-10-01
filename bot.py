@@ -1,4 +1,4 @@
-import os
+﻿import os
 import asyncio
 import logging
 import sqlite3
@@ -185,8 +185,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.14"
-APP_VERSION_TITULO = "PUBLICACIONES RESTRINGIDAS · MEMBRESÍA DINÁMICA + /ORMA"
+APP_VERSION = "1.0.15"
+APP_VERSION_TITULO = "PRUEBA · ELIMINACIÓN DE MENSAJE DE ORIGEN"
 APP_VERSION_FECHA = "29/09/2026 21:40:00"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
@@ -5658,6 +5658,98 @@ def texto_auditoria_raiz():
     return "\n".join(lineas)
 
 
+async def eliminar_origen_supervision_callback(update, context):
+    """Eliminación puntual desde supervisión; conserva la copia y /orma."""
+    query = update.callback_query
+    usuario = update.effective_user
+    if not query or not usuario:
+        return
+    permitidos = {int(v) for v in (ADMIN_USER_ID, ORMA_ADMIN_USER_ID) if int(v or 0) > 0}
+    if usuario.id not in permitidos:
+        await query.answer("Acceso no autorizado.", show_alert=True)
+        return
+    if not query.message or query.message.chat_id != GRUPO_PUBLICIDAD_NO_IDENTIFICADA_ID:
+        await query.answer("Acción disponible solo en el grupo de supervisión.", show_alert=True)
+        return
+    try:
+        captura_id = int((query.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await query.answer("Referencia inválida.", show_alert=True)
+        return
+    captura = obtener_captura_orma(captura_id)
+    if not captura or int(captura["propietario_id"]) not in permitidos:
+        await query.answer("Captura no disponible.", show_alert=True)
+        return
+    if (str(captura["chat_username"] or "").lower() not in usernames_grupos_oficiales()
+            or not captura["mensaje_origen_id"]):
+        await query.answer("Origen no autorizado.", show_alert=True)
+        return
+    await query.answer("Procesando eliminación…")
+    with conectar_db() as conexion:
+        anterior = conexion.execute(
+            "SELECT 1 FROM auditoria_orma_acciones WHERE captura_id=? "
+            "AND accion='ELIMINAR_MENSAJE_ORIGEN' AND resultado='OK' LIMIT 1",
+            (captura_id,),
+        ).fetchone()
+    if anterior:
+        estado = "✅ ELIMINADO DEL GRUPO DE ORIGEN"
+    else:
+        try:
+            eliminado = await context.bot.delete_message(
+                chat_id=int(captura["chat_id"]),
+                message_id=int(captura["mensaje_origen_id"]),
+            )
+            if not eliminado:
+                raise TelegramError("Telegram no confirmó la eliminación.")
+        except TelegramError as error:
+            try:
+                registrar_auditoria_orma(
+                    usuario.id, captura, "ELIMINAR_MENSAJE_ORIGEN",
+                    grupo={"chat_id": captura["chat_id"], "username": captura["chat_username"],
+                           "nombre": captura["chat_nombre"]},
+                    detalle=f"message_id={captura['mensaje_origen_id']}",
+                    resultado="ERROR", error=str(error),
+                )
+            except Exception:
+                logging.exception("No se pudo auditar el fallo de borrado de origen")
+            await context.bot.send_message(
+                chat_id=GRUPO_PUBLICIDAD_NO_IDENTIFICADA_ID,
+                text=("❌ No se confirmó la eliminación del mensaje "
+                      f"{captura['mensaje_origen_id']} del grupo de origen.\n"
+                      f"Motivo: {error}"),
+                reply_to_message_id=query.message.message_id,
+            )
+            return
+        # La auditoría no modifica perfiles, límites ni clientes editados.
+        try:
+            with conectar_db() as conexion:
+                conexion.execute(
+                    "INSERT INTO auditoria_orma_acciones "
+                    "(propietario_id,captura_id,objetivo_tipo,objetivo_id,accion,chat_id,"
+                    "chat_username,chat_nombre,detalle,resultado,error,fecha_evento) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (usuario.id, captura_id, captura["objetivo_tipo"], captura["objetivo_id"],
+                     "ELIMINAR_MENSAJE_ORIGEN", captura["chat_id"], captura["chat_username"],
+                     captura["chat_nombre"], f"message_id={captura['mensaje_origen_id']}",
+                     "OK", None, datetime.now(timezone.utc).isoformat()),
+                )
+        except Exception:
+            logging.exception("Mensaje eliminado, pero no se pudo persistir la auditoría")
+        estado = "✅ ELIMINADO DEL GRUPO DE ORIGEN"
+    teclado = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛡 CONTROL INDIVIDUAL /ORMA", callback_data=f"orma_ficha:{captura_id}")],
+        [InlineKeyboardButton(estado, callback_data=f"orma_borrar_origen:{captura_id}")],
+    ])
+    try:
+        await query.edit_message_reply_markup(reply_markup=teclado)
+    except TelegramError:
+        logging.exception("No se pudo actualizar el botón de eliminación")
+        await context.bot.send_message(
+            chat_id=GRUPO_PUBLICIDAD_NO_IDENTIFICADA_ID,
+            text=f"{estado} · Message ID: {captura['mensaje_origen_id']}",
+        )
+
+
 async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     usuario = update.effective_user
@@ -7626,7 +7718,10 @@ async def replicar_actividad_humana_supervision(
             "🛡 CONTROL INDIVIDUAL /ORMA",
             callback_data=f"orma_ficha:{captura_id}",
         )
-    ]])
+    ], [InlineKeyboardButton(
+        "🗑 ELIMINAR ESTE MENSAJE",
+        callback_data=f"orma_borrar_origen:{captura_id}",
+    )]])
 
     cabecera = (
         "🔎 <b>ACTIVIDAD NO IDENTIFICADA</b>\n"
@@ -8885,6 +8980,9 @@ async def main():
     maximo_app.add_handler(CommandHandler("start", maximo_start))
     maximo_app.add_handler(CommandHandler("estado", maximo_estado))
     maximo_app.add_handler(CommandHandler("orma", orma_comando))
+    maximo_app.add_handler(
+        CallbackQueryHandler(eliminar_origen_supervision_callback, pattern=r"^orma_borrar_origen:")
+    )
     maximo_app.add_handler(
         CallbackQueryHandler(orma_callback, pattern=r"^orma_")
     )

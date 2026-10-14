@@ -1,3 +1,5 @@
+APROBADA POR EL USUARIO: v1.0.17 revision 2, 14/10/2026. Desplegada en JustRunMy; pruebas reales no confirmadas.
+
 # v1.0.17 · REVISIÓN 2 · filtro de membresía en permisos individuales
 
 14/10/2026. Se mantiene v1.0.17 por solicitud expresa. Base: candidata c885c1f entregada anteriormente. No desplegada.

@@ -1,11 +1,54 @@
-MÁXIMO CONTROL GROUP — 1.0.15 PRUEBA
+# MÁXIMO CONTROL GROUP · candidata v1.0.16
 
-Cambio: botón ELIMINAR ESTE MENSAJE debajo de /ORMA, solamente en las nuevas cabeceras de PUBLICIDAD NO IDENTIFICADA. Elimina el mensaje de origen con sus IDs guardados; conserva la copia. Acceso exclusivo a ADMIN_USER_ID y ORMA_ADMIN_USER_ID configurados. Registra resultado en auditoria_orma_acciones. Un resultado previamente confirmado evita repetir el borrado tras reiniciar.
+Preparada el 13/10/2026 a partir de v1.0.15, commit 238d8768c58a2e5e3eccbdbd063e85d8f1ac8942.
+Estado: CANDIDATA. No desplegada ni aprobada mediante pruebas reales.
 
-No cambia la membresía, exclusiones, controles publicitarios, replicación ni moderación. Dockerfile, agente de respaldo y requirements son idénticos al respaldo 1.0.14. No incluye ni restaura maximo_control.db. No aplica botones retroactivamente a cabeceras antiguas.
+## Correcciones realizadas
 
-Versión candidata: pruebas locales con Telegram simulado, no validación en servidor. Se verificaron autorización, destino, captura inexistente, error de Telegram, IDs exactos de origen, auditoría, conservación de /ORMA, repetición y mensajes independientes. Sintaxis Python correcta.
+1. **Paneles propios por grupo:** añadida la columna faltante de texto simple. Ya no fallan al abrir reglas propias ni al volver después de cambiar modo, separación o límites.
+2. **Texto simple por grupo:** botón nuevo en TIPOS. La clasificación utiliza la regla efectiva del grupo. ILIMITADO y EXCLUIDO liberan este texto del control publicitario; la puerta de membresía 12/12 mantiene su independencia.
+3. **Conservación de reglas:** la migración copia a las reglas propias existentes su excepción anterior de texto, sin borrar registros. Es idempotente. Copiar una regla global conserva su ancla diaria; volver a pulsar PERSONALIZADO no sobrescribe una regla propia.
+4. **Contadores diarios:** los paneles global e individual usan el mismo ciclo anclado de 24 horas que el motor de límites. Los contadores históricos generales siguen siendo estadísticas.
+5. **Navegación:** las pantallas secundarias editadas desde el panel añaden MENÚ PRINCIPAL y CERRAR si faltan. Se mantienen los regresos y cancelaciones existentes. La ficha incorpora regreso a CLIENTES EDITADOS. Los paneles de supervisión conservan sus botones originales.
+6. **Cancelación efectiva:** navegar, cancelar, regresar, cerrar o ir al menú limpia las entradas manuales pendientes. Un número posterior ya no modifica una pantalla abandonada.
+7. **Paneles duplicados:** una edición sin cambios se considera resuelta. Si el panel desapareció o no puede editarse, se crea reemplazo y se guarda su ID para las siguientes entradas manuales. Otros errores no se disfrazan creando paneles nuevos.
+8. **Errores de entrada:** los valores manuales inválidos por grupo, mute y username exento muestran explicación y salida. Se aclara que 0 bloquea un límite, pero elimina una separación.
+9. **Validación del panel:** se valida la pertenencia de la ficha al administrador antes de despachar sus botones; se rechazan grupos, tipos, modos, campos y acciones inválidos. Las entradas privadas requieren autorización administrativa actual. Si no se resuelve un grupo, no se escribe chat_id vacío.
+10. **Moderación:** DESMUTEAR requiere leer los permisos reales del grupo; no inventa permisos si la consulta falla. La selección se consume al confirmar una operación para evitar repetirla usando una confirmación vieja.
+11. **Información coherente:** se incluye texto simple en el resumen de tipos de la ficha. Las pantallas que no comprueban los doce grupos no afirman que la pertenencia a un solo grupo acredita 12/12.
+12. **Base de datos:** las conexiones utilizadas mediante contexto se cierran al terminar y conservan el comportamiento de commit/rollback.
 
-Validación en JustRunMy: publicar dos mensajes desde usuario con 12/12, comprobar ambos botones, borrar uno y verificar que solo desaparece ese original, conservar copia y /ORMA, comprobar segundo botón. Revisar rechazo sin permisos y mensaje de más de 48 horas. Verificar persistencia después de reiniciar. GitHub y Oracle solo después de aprobación.
+## Verificación local
 
-Limitaciones: borrado con permisos administrativos y menos de 48 horas según Telegram. Los mensajes de un álbum son mensajes individuales. No se corrigen en esta versión los hallazgos ajenos al cambio: secreto literal heredado en Dockerfile, errores de membresía y reintentos de eliminación preexistentes.
+- Sintaxis de todos los módulos Python: correcta.
+- Migración ejecutada dos veces sobre copia del respaldo: correcta e idempotente.
+- Integridad SQLite después de migrar: OK.
+- Comparación completa de filas originales de usuarios, doce grupos, bots exentos, eventos de publicidad, eventos de membresía y perfiles individuales antes de las pruebas: idénticas.
+- 167 escenarios de callbacks con Telegram simulado: correctos. Incluyen doce grupos, reglas heredadas y propias, modos, separación, límites, tipos, entradas y cancelaciones, raíz, moderación y callbacks inválidos.
+- Motor de texto simple: probado restringido/libre por grupo y liberación por ILIMITADO/EXCLUIDO.
+- MUTE, UNMUTE, BAN, UNBAN y EXPULSAR: llamadas simuladas y auditoría verificadas. UNMUTE sin permisos informados falla de forma controlada.
+- Edición repetida: no crea mensaje adicional. Panel inexistente: guarda ID del reemplazo.
+- Dockerfile, requirements y agente remoto: byte a byte idénticos al respaldo.
+- Puerta 12/12, consultas de membresía, anti-evasión, barrera de comandos, replicación, excepciones oficiales, borrado desde supervisión y registro principal de handlers: funciones comparadas y conservadas.
+
+Las pruebas ejecutan las funciones del código con objetos simulados; no establecen una conexión con Telegram ni certifican permisos reales. No se ha hecho una prueba real con la biblioteca instalada en JustRunMy.
+
+## Alcance y límites
+
+El paquete contiene código y metadatos; NO incluye maximo_control.db, NO restaura una base ni contiene historial Git. Debe aplicarse sobre el repositorio existente conservando .git y la base activa. El primer inicio añade una columna; no elimina datos. Para volver a v1.0.15 se puede recuperar el código anterior: la columna adicional es compatible con sus consultas.
+
+Se conserva el comportamiento previo de la puerta 12/12 ante errores de Telegram (un fallo puede considerarse grupo faltante). Sigue siendo un riesgo conocido del motor de membresía; no se cambió esa política para mantener las restricciones existentes mientras se valida el panel.
+
+La autorización de PublicidadContratada_bot permanece protegida. No se cambiaron credenciales, destinos, reglas raíz, mensajes de supervisión ni conexiones de servidores.
+
+## Validación real requerida en JustRunMy
+
+1. Abrir CLIENTES EDITADOS y una ficha existente. Recorrer membresía, actividad, publicidad, movimientos y auditoría.
+2. Recorrer los doce controles de grupo. Configurar una prueba propia; entrar y regresar de modo, separación, límites y tipos. Confirmar que no desaparece ni se duplica el panel.
+3. Con una identidad de prueba que tenga 12/12, comparar texto simple restringido, libre, ILIMITADO y EXCLUIDO. Verificar que el cambio de un grupo no afecta a los otros once.
+4. Introducir un valor inválido; corregirlo. Después cancelar una entrada y escribir un número: no debe cambiar ningún límite.
+5. Verificar cupo 0, cupo positivo y reloj diario; pulsar PERSONALIZADO de nuevo y confirmar conservación de valores.
+6. Comprobar regreso, menú principal y cerrar en pantallas secundarias; comprobar moderación solo sobre identidad y grupo de prueba. Verificar que una confirmación usada no repite la acción.
+7. Comprobar autorización de bots oficiales, publicación de Publicidad Contratada, copias de supervisión y borrado puntual de origen. Reiniciar y verificar persistencia.
+
+GitHub y respaldo aprobado de Oracle únicamente después de tu aprobación explícita de estas pruebas. El respaldo de código es distinto del de base de datos.

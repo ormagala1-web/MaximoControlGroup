@@ -1,32 +1,38 @@
-﻿{
-    "project":  "MaximoControlGroup_bot",
-    "telegram_bot":  "@MaximoControlGroup_bot",
-    "version":  "1.0.15",
-    "status":  "APPROVED",
-    "base_version":  "1.0.14",
-    "base_commit":  "1972f0a6321172f22da74ac3d25c3329c96107ce",
-    "timezone":  "America/Lima",
-    "date_format":  "DD/MM/YYYY HH:mm:ss",
-    "title":  "ELIMINACIÓN DE MENSAJE DE ORIGEN",
-    "live_validation":  "VALIDATED_JUSTRUNMY_3_GROUPS",
-    "scope_lock":  "SOLO_SUPERVISION_INVERSA_SIN_ALTERAR_CONTROLES_EXISTENTES",
-    "changes":  [
-                    "Botón debajo de /ORMA para borrar únicamente el mensaje de origen desde PUBLICIDAD NO IDENTIFICADA",
-                    "Autorización por ID administrativo, auditoría y conservación de copia",
-                    "Sin cambios en membresía, replicación, límites ni reglas existentes"
-                ],
-    "database_migration":  [
-
-                           ],
-    "protected_unchanged":  [
-                                "Puerta de membresÃ­a 12/12",
-                                "CONTROL PUBLICITARIO y contadores existentes",
-                                "ModeraciÃ³n y anti-evasiÃ³n existentes",
-                                "Grupo de pruebas",
-                                "datos existentes de maximo_control.db",
-                                "Dockerfile",
-                                "agente_respaldo_remoto.py",
-                                "requirements.txt"
-                            ],
-    "updated_at":  "01/10/2026 10:35:41"
+{
+  "project": "MaximoControlGroup_bot",
+  "telegram_bot": "@MaximoControlGroup_bot",
+  "version": "1.0.16",
+  "status": "CANDIDATE",
+  "base_version": "1.0.15",
+  "base_commit": "238d8768c58a2e5e3eccbdbd063e85d8f1ac8942",
+  "timezone": "America/Lima",
+  "title": "PANEL FUNCIONAL",
+  "updated_at": "13/10/2026",
+  "live_validation": "PENDING_JUSTRUNMY",
+  "database_migration": [
+    "control_publicidad_grupos.controlar_texto_simple: aditiva e idempotente; conserva excepción anterior"
+  ],
+  "changed_functions": [
+    "safe_edit_message_text",
+    "safe_query_edit_message",
+    "conectar_db",
+    "inicializar_base_datos",
+    "texto_control_publicidad",
+    "cabecera_identidad_orma",
+    "actualizar_control_grupo_db",
+    "copiar_global_a_grupo_db",
+    "permisos_normales_grupo",
+    "teclado_ficha_orma",
+    "_tipos_controlados_ficha",
+    "texto_control_publicidad_grupo",
+    "orma_callback",
+    "control_publicidad_individual_grupos",
+    "procesar_entrada_control_publicidad"
+  ],
+  "added_functions": [
+    "completar_navegacion_panel",
+    "registrar_panel_reemplazo",
+    "mostrar_error_entrada_panel"
+  ],
+  "validation": "167 callbacks simulados; migración doble; integridad y conservación de datos; motores y moderación simulados"
 }

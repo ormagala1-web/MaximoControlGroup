@@ -1,10 +1,11 @@
-﻿import os
+import os
 import asyncio
 import logging
 import sqlite3
 import html
 import hashlib
 import re
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
@@ -30,6 +31,30 @@ logging.basicConfig(
 )
 
 
+def completar_navegacion_panel(markup):
+    if markup is None:
+        return None
+    filas = [list(fila) for fila in markup.inline_keyboard]
+    callbacks = [str(b.callback_data or "") for fila in filas for b in fila]
+    if not any(x.startswith("orma_") for x in callbacks):
+        return markup
+    ultima = []
+    if "orma_menu_principal" not in callbacks:
+        ultima.append(InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"))
+    if "orma_cerrar" not in callbacks:
+        ultima.append(InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"))
+    if ultima:
+        filas.append(ultima)
+    return InlineKeyboardMarkup(filas)
+
+
+def registrar_panel_reemplazo(chat_id, mensaje):
+    if int(chat_id) > 0:
+        PANELES_ORMA[int(chat_id)] = mensaje.message_id
+        guardar_panel_orma_db(int(chat_id), mensaje.message_id)
+    return mensaje
+
+
 async def safe_edit_message_text(
     bot,
     *,
@@ -40,6 +65,7 @@ async def safe_edit_message_text(
     reply_markup=None,
     **kwargs,
 ):
+    reply_markup = completar_navegacion_panel(reply_markup)
     try:
         return await bot.edit_message_text(
             chat_id=chat_id,
@@ -51,19 +77,22 @@ async def safe_edit_message_text(
         )
     except TelegramError as error:
         detalle = str(error).lower()
+        if "message is not modified" in detalle:
+            return None
         if (
-            "message is not modified" in detalle
-            or "message to edit not found" in detalle
+            "message to edit not found" in detalle
             or "message can't be edited" in detalle
-            or "bad request" in detalle
         ):
-            return await bot.send_message(
+            nuevo = await bot.send_message(
                 chat_id=chat_id,
                 text=text,
                 parse_mode=parse_mode,
                 reply_markup=reply_markup,
                 **kwargs,
             )
+            if reply_markup and any(str(b.callback_data or "").startswith("orma_") for fila in reply_markup.inline_keyboard for b in fila):
+                registrar_panel_reemplazo(chat_id, nuevo)
+            return nuevo
         raise
 
 
@@ -74,6 +103,7 @@ async def safe_query_edit_message(
     reply_markup=None,
     **kwargs,
 ):
+    reply_markup = completar_navegacion_panel(reply_markup)
     try:
         return await query.edit_message_text(
             text=text,
@@ -83,19 +113,21 @@ async def safe_query_edit_message(
         )
     except TelegramError as error:
         detalle = str(error).lower()
+        if "message is not modified" in detalle:
+            return None
         if (
-            "message is not modified" in detalle
-            or "message to edit not found" in detalle
+            "message to edit not found" in detalle
             or "message can't be edited" in detalle
-            or "bad request" in detalle
         ):
-            return await query.get_bot().send_message(
+            nuevo = await query.get_bot().send_message(
                 chat_id=query.message.chat_id,
                 text=text,
                 parse_mode=parse_mode,
                 reply_markup=reply_markup,
                 **kwargs,
             )
+            registrar_panel_reemplazo(query.message.chat_id, nuevo)
+            return nuevo
         raise
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -185,9 +217,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.15"
-APP_VERSION_TITULO = "ELIMINACIÓN DE MENSAJE DE ORIGEN"
-APP_VERSION_FECHA = "29/09/2026 21:40:00"
+APP_VERSION = "1.0.16"
+APP_VERSION_TITULO = "PANEL FUNCIONAL · CANDIDATA"
+APP_VERSION_FECHA = "13/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -207,10 +239,15 @@ TIPOS_PUBLICIDAD_CONTROLABLE = {
 }
 
 
+@contextmanager
 def conectar_db():
     conexion = sqlite3.connect(DATABASE_PATH)
     conexion.row_factory = sqlite3.Row
-    return conexion
+    try:
+        with conexion:
+            yield conexion
+    finally:
+        conexion.close()
 
 
 def columna_existe(conexion, tabla, columna):
@@ -452,6 +489,14 @@ def inicializar_base_datos():
                 ADD COLUMN controlar_texto_simple INTEGER NOT NULL DEFAULT 0
                 """
             )
+
+        # Preservar la excepción efectiva de las reglas propias anteriores.
+        if not columna_existe(conexion, "control_publicidad_grupos", "controlar_texto_simple"):
+            conexion.execute("ALTER TABLE control_publicidad_grupos ADD COLUMN controlar_texto_simple INTEGER NOT NULL DEFAULT 0")
+            conexion.execute("""UPDATE control_publicidad_grupos SET controlar_texto_simple =
+                COALESCE((SELECT controlar_texto_simple FROM control_publicidad_identidades i
+                WHERE i.identidad_tipo=control_publicidad_grupos.identidad_tipo
+                AND i.identidad_id=control_publicidad_grupos.identidad_id), 0)""")
 
         # v1.0.3: ancla independiente para ciclos diarios móviles de 24 horas.
         for tabla in ("control_publicidad_identidades", "control_publicidad_grupos"):
@@ -2707,6 +2752,11 @@ async def texto_control_publicidad(captura):
         captura["objetivo_id"],
         captura["chat_id"],
     )
+    inicio_diario, _ = ciclo_diario_24h_config(cfg)
+    if inicio_diario is not None:
+        uso["dia"] = contar_publicidad_permitida_grupo_db(
+            captura["objetivo_tipo"], captura["objetivo_id"], captura["chat_id"], inicio_diario.isoformat()
+        )
     ritmo = resumen_frecuencia_publicidad_db(
         captura["objetivo_tipo"],
         captura["objetivo_id"],
@@ -2792,7 +2842,7 @@ async def texto_control_publicidad(captura):
         (
             "• Texto normal puro: <b>RESTRINGIDO SOLO PARA ESTA IDENTIDAD · "
             "MEMBRESÍA PUBLICITARIA</b>"
-            if bool(cfg["controlar_texto_simple"])
+            if bool(cfg["controlar_texto_simple"]) and modo not in {"ILIMITADO", "EXCLUIDO"}
             else "• Texto normal puro: <b>LIBRE POR REGLA DE RAÍZ</b>"
         ),
         "",
@@ -3599,7 +3649,7 @@ def cabecera_identidad_orma(captura, *, rol=None, habilitado=None):
     )
 
     if habilitado is None:
-        habilitado_txt = "Verificando / no aplica"
+        habilitado_txt = "NO COMPROBADO EN ESTA PANTALLA"
     else:
         habilitado_txt = "SÍ" if bool(habilitado) else "NO"
 
@@ -4037,6 +4087,7 @@ def actualizar_control_grupo_db(
 ):
     permitidos = {
         "modo",
+        "ancla_limite_dia",
         "separacion_segundos",
         "limite_hora",
         "limite_dia",
@@ -4049,6 +4100,7 @@ def actualizar_control_grupo_db(
         "controlar_documento",
         "controlar_enlace",
         "controlar_custom_emoji",
+        "controlar_texto_simple",
     }
 
     datos = {k: v for k, v in campos.items() if k in permitidos}
@@ -4069,7 +4121,7 @@ def actualizar_control_grupo_db(
     if chat_nombre is not None:
         datos["chat_nombre"] = chat_nombre
     ahora_actualizacion = datetime.now(timezone.utc).isoformat()
-    if "limite_dia" in datos:
+    if "limite_dia" in datos and "ancla_limite_dia" not in datos:
         datos["ancla_limite_dia"] = (
             ahora_actualizacion if datos["limite_dia"] is not None else None
         )
@@ -4136,6 +4188,7 @@ def copiar_global_a_grupo_db(
         "separacion_segundos": global_cfg["separacion_segundos"],
         "limite_hora": global_cfg["limite_hora"],
         "limite_dia": global_cfg["limite_dia"],
+        "ancla_limite_dia": global_cfg["ancla_limite_dia"],
         "limite_semana": global_cfg["limite_semana"],
         "limite_mes": global_cfg["limite_mes"],
         "limite_anio": global_cfg["limite_anio"],
@@ -4145,6 +4198,7 @@ def copiar_global_a_grupo_db(
         "controlar_documento": global_cfg["controlar_documento"],
         "controlar_enlace": global_cfg["controlar_enlace"],
         "controlar_custom_emoji": global_cfg["controlar_custom_emoji"],
+        "controlar_texto_simple": global_cfg["controlar_texto_simple"] ,
     }
     actualizar_control_grupo_db(
         identidad_tipo,
@@ -4240,29 +4294,11 @@ def permisos_mute_total():
 
 
 async def permisos_normales_grupo(bot, chat_ref):
-    try:
-        chat = await bot.get_chat(chat_ref)
-        if getattr(chat, "permissions", None) is not None:
-            return chat.permissions
-    except TelegramError:
-        pass
-
-    return ChatPermissions(
-        can_send_messages=True,
-        can_send_audios=True,
-        can_send_documents=True,
-        can_send_photos=True,
-        can_send_videos=True,
-        can_send_video_notes=True,
-        can_send_voice_notes=True,
-        can_send_polls=True,
-        can_send_other_messages=True,
-        can_add_web_page_previews=True,
-        can_change_info=False,
-        can_invite_users=True,
-        can_pin_messages=False,
-        can_manage_topics=False,
-    )
+    chat = await bot.get_chat(chat_ref)
+    permisos = getattr(chat, "permissions", None)
+    if permisos is None:
+        raise RuntimeError("No se pudieron obtener los permisos actuales del grupo; no se aplicó desmute.")
+    return permisos
 
 
 async def ejecutar_moderacion_grupo_orma(
@@ -4584,6 +4620,7 @@ def teclado_ficha_orma(captura_id):
         ],
         [InlineKeyboardButton("🛡️ CONTROL TOTAL · MODERACIÓN", callback_data=f"orma_mod:{captura_id}")],
         [InlineKeyboardButton("📜 AUDITORÍA /ORMA", callback_data=f"orma_audit:{captura_id}")],
+        [InlineKeyboardButton("⬅️ CLIENTES EDITADOS", callback_data="orma_clientes_editados:0")],
         [
             InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
             InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
@@ -4648,6 +4685,7 @@ def _tipos_controlados_ficha(cfg):
         ("controlar_documento", "Documento"),
         ("controlar_enlace", "Enlace"),
         ("controlar_custom_emoji", "Premium emoji"),
+        ("controlar_texto_simple", "Texto simple"),
     ]
     controlados = [nombre for campo, nombre in campos if bool(cfg[campo])]
     libres = [nombre for campo, nombre in campos if not bool(cfg[campo])]
@@ -5245,6 +5283,9 @@ async def texto_control_publicidad_grupo(captura, grupo, cfg):
     efectivo = global_cfg if heredado else cfg
 
     limites = limites_periodos_publicidad()
+    inicio_diario, _ = ciclo_diario_24h_config(efectivo)
+    if inicio_diario is not None:
+        limites["dia"] = inicio_diario.isoformat()
     uso = {}
     for periodo, inicio in limites.items():
         uso[periodo] = contar_publicidad_permitida_grupo_db(
@@ -5269,7 +5310,7 @@ async def texto_control_publicidad_grupo(captura, grupo, cfg):
         cabecera_identidad_orma(
             captura,
             rol=rol,
-            habilitado=habilitado,
+            habilitado=None,
         ),
         "",
         f"📍 Grupo: <b>{html.escape(str(grupo['nombre']))}</b>",
@@ -5293,7 +5334,7 @@ async def texto_control_publicidad_grupo(captura, grupo, cfg):
         "🎛 <b>TIPOS</b>",
         f"• Controlados: <b>{', '.join(activos) if activos else 'NINGUNO'}</b>",
         f"• Libres: <b>{', '.join(libres) if libres else 'NINGUNO'}</b>",
-        "• Texto normal puro: <b>LIBRE POR REGLA GENERAL · EXCEPCIÓN INDIVIDUAL ANTI-EVASIÓN</b>",
+        "• Texto simple: <b>" + ("RESTRINGIDO" if bool(efectivo["controlar_texto_simple"]) and str(efectivo["modo"]).upper() not in {"ILIMITADO", "EXCLUIDO"} else "LIBRE DEL CONTROL PUBLICITARIO") + "</b>",
         "",
         f"🕐 Actualizado: <b>{formatear_fecha_peru(cfg['fecha_actualizacion'])}</b>",
     ])
@@ -5750,6 +5791,10 @@ async def eliminar_origen_supervision_callback(update, context):
         )
 
 
+CALLBACKS_FICHA = ('orma_ficha:', 'orma_membresia:', 'orma_actividad:', 'orma_movimientos:', 'orma_audit:', 'orma_pg_lista:', 'orma_pg:', 'orma_pgm:', 'orma_pgmset:', 'orma_pgs:', 'orma_pgsset:', 'orma_pgl:', 'orma_pgnolim:', 'orma_pgt:', 'orma_pgtog:', 'orma_pgr:', 'orma_pgin:', 'orma_mod:', 'orma_modacc:', 'orma_modtog:', 'orma_modall:', 'orma_modnone:', 'orma_modnext:', 'orma_moddur:', 'orma_modgo:', 'orma_publicidad:', 'orma_pub_modo:', 'orma_pub_setmodo:', 'orma_pub_sep:', 'orma_pub_setsep:', 'orma_pub_limites:', 'orma_pub_sinlimites:', 'orma_pub_tipos:', 'orma_pub_texto_simple:', 'orma_pub_texto_apply:', 'orma_pub_toggle:', 'orma_pub_reset:', 'orma_pub_input:', 'orma_pub_cancelinput:')
+CAMPOS_TIPOS_PANEL = ('controlar_foto', 'controlar_video', 'controlar_gif', 'controlar_documento', 'controlar_enlace', 'controlar_custom_emoji', 'controlar_texto_simple')
+
+
 async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     usuario = update.effective_user
@@ -5761,6 +5806,39 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = query.data or ""
+
+    ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
+    ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+    ENTRADAS_RAIZ.pop(usuario.id, None)
+    if data.startswith(CALLBACKS_FICHA):
+        try:
+            captura_control = obtener_captura_orma(int(data.split(":")[1]))
+            if not captura_pertenece_propietario(captura_control, usuario.id):
+                raise ValueError
+        except (ValueError, IndexError, TypeError):
+            await query.answer("Ficha no disponible. Abre una ficha actual.", show_alert=True)
+            return
+        partes = data.split(":")
+        if data.startswith(("orma_pub_input:", "orma_pgin:")) and partes[-1] not in {"separacion_minutos", "limite_hora", "limite_dia", "limite_semana", "limite_mes", "limite_anio"}:
+            await query.answer("Campo no válido.", show_alert=True)
+            return
+        if data.startswith(("orma_modacc:", "orma_modall:", "orma_modnone:", "orma_modnext:", "orma_modgo:")) and partes[-1] not in {"MUTE", "UNMUTE", "BAN", "UNBAN", "EXPULSAR"}:
+            await query.answer("Acción no válida.", show_alert=True)
+            return
+        if data.startswith(("orma_pg:", "orma_pgm", "orma_pgs", "orma_pgl", "orma_pgnolim:", "orma_pgt", "orma_pgr:", "orma_pgin:")):
+            try:
+                if not 1 <= int(partes[2]) <= TOTAL_GRUPOS_OBLIGATORIOS:
+                    raise ValueError
+            except (ValueError, IndexError):
+                await query.answer("Grupo no válido.", show_alert=True)
+                return
+        if data.startswith(("orma_pgtog:", "orma_pub_toggle:")) and partes[-1] not in CAMPOS_TIPOS_PANEL:
+            await query.answer("Tipo no válido.", show_alert=True)
+            return
+        if data.startswith(("orma_pgmset:", "orma_pub_setmodo:")) and partes[-1] not in {"HEREDADO", "PERSONALIZADO", "ILIMITADO", "BLOQUEADO", "EXCLUIDO"}:
+            await query.answer("Modo no válido.", show_alert=True)
+            return
+
 
     if data == "orma_cerrar":
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
@@ -5918,7 +5996,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (TypeError, ValueError):
             await query.answer("Valor no válido", show_alert=True)
             return
-        if segundos not in {15, 30, 60, 120}:
+        if tipo_tiempo not in {"membresia", "publicidad"} or segundos not in {15, 30, 60, 120}:
             await query.answer("Tiempo no autorizado", show_alert=True)
             return
         clave = "aviso_membresia_segundos" if tipo_tiempo == "membresia" else "aviso_publicidad_segundos"
@@ -6376,7 +6454,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ILIMITADO: registra pero no limita en este grupo.\n"
             "BLOQUEADO: elimina toda publicidad controlable en este grupo.\n"
             "EXCLUIDO: no aplica control publicitario en este grupo.\n\n"
-            "El texto normal puro permanece libre.",
+            "El texto simple respeta la excepción configurada. La membresía 12/12 sigue siendo independiente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -6412,7 +6490,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 captura["objetivo_id"],
                 grupo["chat_id"],
             )
-        elif modo == "PERSONALIZADO":
+        elif modo == "PERSONALIZADO" and str(obtener_control_grupo_db(captura["objetivo_tipo"], captura["objetivo_id"], grupo["chat_id"])["modo"]).upper() == "HEREDADO":
             copiar_global_a_grupo_db(
                 captura["objetivo_tipo"],
                 captura["objetivo_id"],
@@ -6491,7 +6569,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         segundos = int(segundos_txt)
         captura = obtener_captura_orma(captura_id)
         grupo = await resolver_chat_grupo_orma(context.bot, indice)
-        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo or grupo["chat_id"] is None:
             await query.answer("Ficha no disponible.", show_alert=True)
             return
 
@@ -6540,7 +6618,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         indice = int(indice_txt)
         captura = obtener_captura_orma(captura_id)
         grupo = await resolver_chat_grupo_orma(context.bot, indice)
-        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo or grupo["chat_id"] is None:
             await query.answer("Ficha no disponible.", show_alert=True)
             return
         cfg = obtener_control_grupo_db(
@@ -6585,7 +6663,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         indice = int(indice_txt)
         captura = obtener_captura_orma(captura_id)
         grupo = await resolver_chat_grupo_orma(context.bot, indice)
-        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo or grupo["chat_id"] is None:
             await query.answer("Ficha no disponible.", show_alert=True)
             return
         actualizar_control_grupo_db(
@@ -6617,7 +6695,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         indice = int(indice_txt)
         captura = obtener_captura_orma(captura_id)
         grupo = await resolver_chat_grupo_orma(context.bot, indice)
-        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo or grupo["chat_id"] is None:
             await query.answer("Ficha no disponible.", show_alert=True)
             return
         cfg = obtener_control_grupo_db(
@@ -6635,7 +6713,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             "🎛 <b>TIPOS · ESTE GRUPO</b>\n\n"
             "✅ entra al control · ❌ queda libre.\n"
-            "Texto normal puro siempre libre.",
+            "El texto simple respeta la excepción de la regla efectiva. ILIMITADO/EXCLUIDO lo liberan; la membresía 12/12 sigue siendo independiente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -6648,6 +6726,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ],
                 [InlineKeyboardButton(f"{marca('controlar_enlace')} ENLACE", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_enlace")],
                 [InlineKeyboardButton(f"{marca('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_custom_emoji")],
+                [InlineKeyboardButton(f"{marca('controlar_texto_simple')} TEXTO SIMPLE", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_texto_simple")],
                 [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
             ]),
         )
@@ -6659,7 +6738,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         indice = int(indice_txt)
         captura = obtener_captura_orma(captura_id)
         grupo = await resolver_chat_grupo_orma(context.bot, indice)
-        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo or grupo["chat_id"] is None:
             await query.answer("Ficha no disponible.", show_alert=True)
             return
         cfg = obtener_control_grupo_db(
@@ -6692,7 +6771,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             "🎛 <b>TIPOS · ESTE GRUPO</b>\n\n"
             "✅ entra al control · ❌ queda libre.\n"
-            "Texto normal puro siempre libre.",
+            "El texto simple respeta la excepción de la regla efectiva. ILIMITADO/EXCLUIDO lo liberan; la membresía 12/12 sigue siendo independiente.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -6705,6 +6784,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ],
                 [InlineKeyboardButton(f"{marca2('controlar_enlace')} ENLACE", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_enlace")],
                 [InlineKeyboardButton(f"{marca2('controlar_custom_emoji')} PREMIUM EMOJI", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_custom_emoji")],
+                [InlineKeyboardButton(f"{marca2('controlar_texto_simple')} TEXTO SIMPLE", callback_data=f"orma_pgtog:{captura_id}:{indice}:controlar_texto_simple")],
                 [InlineKeyboardButton("⬅️ RETROCEDER", callback_data=f"orma_pg:{captura_id}:{indice}")],
             ]),
         )
@@ -6716,7 +6796,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         indice = int(indice_txt)
         captura = obtener_captura_orma(captura_id)
         grupo = await resolver_chat_grupo_orma(context.bot, indice)
-        if not captura_pertenece_propietario(captura, usuario.id) or not grupo:
+        if not captura_pertenece_propietario(captura, usuario.id) or not grupo or grupo["chat_id"] is None:
             await query.answer("Ficha no disponible.", show_alert=True)
             return
         borrar_control_grupo_db(
@@ -7028,6 +7108,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("No hay grupos seleccionados.", show_alert=True)
             return
 
+        grupos_ejecucion = set(estado["grupos"])
+        duracion_ejecucion = estado.get("duracion_segundos")
+        SELECCIONES_MODERACION_ORMA.pop(usuario.id, None)
         await query.answer("Ejecutando...")
         await safe_query_edit_message(
             query,
@@ -7043,8 +7126,8 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             usuario.id,
             captura,
             accion,
-            estado["grupos"],
-            duracion_segundos=estado.get("duracion_segundos"),
+            grupos_ejecucion,
+            duracion_segundos=duracion_ejecucion,
         )
 
         await safe_query_edit_message(
@@ -7858,10 +7941,7 @@ async def control_publicidad_individual_grupos(
             if not estado["completo"]:
                 return
 
-        cfg_identidad_texto = obtener_control_identidad_db(
-            identidad_tipo,
-            identidad_id,
-        )
+        cfg_identidad_texto, _ = control_efectivo_para_chat(identidad_tipo, identidad_id, chat)
         tipo_contenido = tipo_publicitario_mensaje(
             mensaje,
             usuario,
@@ -7895,7 +7975,8 @@ async def control_publicidad_individual_grupos(
     if tipo_contenido is None:
         return
 
-    if tipo_contenido == "TEXTO SIMPLE" and usuario is not None:
+    if (tipo_contenido == "TEXTO SIMPLE" and usuario is not None
+            and str(cfg_identidad_texto["modo"]).upper() not in {"ILIMITADO", "EXCLUIDO"}):
         context.chat_data[f"supervision_bloqueada:{mensaje.message_id}"] = True
         estado_supervision = await obtener_estado_membresia_7de7(usuario.id)
         await replicar_publicacion_restringida(
@@ -8487,6 +8568,19 @@ async def borrar_aviso_origen_desde_payload(
         tarea.cancel()
 
 
+async def mostrar_error_entrada_panel(context, usuario_id, texto, volver):
+    panel_id = PANELES_ORMA.get(usuario_id) or obtener_panel_orma_db(usuario_id)
+    teclado = completar_navegacion_panel(InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ CANCELAR / REGRESAR", callback_data=volver)]
+    ]))
+    if panel_id:
+        await safe_edit_message_text(context.bot, chat_id=usuario_id, message_id=panel_id,
+            text=texto, reply_markup=teclado)
+    else:
+        nuevo = await context.bot.send_message(chat_id=usuario_id, text=texto, reply_markup=teclado)
+        registrar_panel_reemplazo(usuario_id, nuevo)
+
+
 async def procesar_entrada_control_publicidad(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -8503,6 +8597,9 @@ async def procesar_entrada_control_publicidad(
     ):
         return
 
+    if not es_administrador_maximo(usuario):
+        return
+
     entrada_raiz = ENTRADAS_RAIZ.get(usuario.id)
     if entrada_raiz:
         try:
@@ -8515,6 +8612,7 @@ async def procesar_entrada_control_publicidad(
             try:
                 agregado = agregar_bot_exento_raiz(username)
             except ValueError:
+                await mostrar_error_entrada_panel(context, usuario.id, "Username no válido. Escribe el @username de un bot o cancela.", "orma_raiz_bots")
                 return
             ENTRADAS_RAIZ.pop(usuario.id, None)
             try:
@@ -8541,6 +8639,9 @@ async def procesar_entrada_control_publicidad(
             if valor < 0:
                 raise ValueError
         except ValueError:
+            volver = (f"orma_pg:{entrada_total['captura_id']}:{entrada_total['indice']}"
+                if entrada_total.get("tipo") == "PUBLICIDAD_GRUPO" else f"orma_mod:{entrada_total['captura_id']}")
+            await mostrar_error_entrada_panel(context, usuario.id, "Valor no válido. Escribe un entero igual o mayor que 0; para mute debe ser mayor que 0.", volver)
             return
 
         captura = obtener_captura_orma(entrada_total["captura_id"])
@@ -8616,6 +8717,7 @@ async def procesar_entrada_control_publicidad(
 
         if entrada_total["tipo"] == "MUTE_MANUAL":
             if valor <= 0:
+                await mostrar_error_entrada_panel(context, usuario.id, "El mute temporal requiere al menos 1 minuto.", f"orma_mod:{captura['id']}")
                 return
             estado = seleccion_moderacion_orma(
                 usuario.id,
@@ -8678,7 +8780,7 @@ async def procesar_entrada_control_publicidad(
                     text=(
                         "❌ <b>VALOR NO VÁLIDO</b>\n\n"
                         "Escribe únicamente un número entero igual o mayor que 0.\n"
-                        "El valor 0 significa ninguna publicación permitida en ese período.\n"
+                        "Para límites: 0 bloquea. Para separación: 0 elimina la espera.\n"
                         "El mensaje será eliminado automáticamente."
                     ),
                     parse_mode="HTML",

@@ -31,6 +31,51 @@ logging.basicConfig(
 )
 
 
+def paginas_html_panel(texto, limite=3600):
+    """Divide HTML sin cortar etiquetas ni entidades; cierra y reabre formato."""
+    paginas, partes, abiertas = [], [], []
+    longitud = 0
+    def unidades(valor):
+        return len(valor.encode("utf-16-le")) // 2
+    def cerrar():
+        return "".join(f"</{nombre}>" for nombre, _ in reversed(abiertas))
+    def volcar():
+        nonlocal partes, longitud
+        paginas.append("".join(partes) + cerrar())
+        partes = [etiqueta for _, etiqueta in abiertas]
+        longitud = sum(unidades(x) for x in partes)
+    for token in re.findall(r"<[^>]*>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z]+);|[^<&]+|[<&]", str(texto)):
+        etiqueta = re.fullmatch(r"<(/?)([a-zA-Z0-9-]+)(?:\s[^>]*)?>", token)
+        if etiqueta:
+            es_cierre, nombre = etiqueta.group(1), etiqueta.group(2)
+            if not es_cierre and longitud + unidades(token) + unidades(cerrar()) + unidades(f"</{nombre}>") > limite:
+                volcar()
+            partes.append(token); longitud += unidades(token)
+            if es_cierre:
+                if abiertas and abiertas[-1][0] == nombre:
+                    abiertas.pop()
+            else:
+                abiertas.append((nombre, token))
+        else:
+            elementos = [token] if token.startswith("&") and token.endswith(";") else token
+            for elemento in elementos:
+                if longitud + unidades(elemento) + unidades(cerrar()) > limite:
+                    volcar()
+                partes.append(elemento); longitud += unidades(elemento)
+    if partes:
+        paginas.append("".join(partes) + cerrar())
+    return paginas or [""]
+
+
+def texto_panel_seguro(texto, parse_mode):
+    if str(parse_mode or "").upper() != "HTML":
+        return texto
+    paginas = paginas_html_panel(texto)
+    if len(paginas) == 1:
+        return paginas[0]
+    return paginas[0] + "\n\n<i>Resumen abreviado. Usa los paneles de detalle para consultar el resto.</i>"
+
+
 def completar_navegacion_panel(markup):
     if markup is None:
         return None
@@ -66,6 +111,7 @@ async def safe_edit_message_text(
     **kwargs,
 ):
     reply_markup = completar_navegacion_panel(reply_markup)
+    text = texto_panel_seguro(text, parse_mode)
     try:
         return await bot.edit_message_text(
             chat_id=chat_id,
@@ -104,6 +150,7 @@ async def safe_query_edit_message(
     **kwargs,
 ):
     reply_markup = completar_navegacion_panel(reply_markup)
+    text = texto_panel_seguro(text, parse_mode)
     try:
         return await query.edit_message_text(
             text=text,
@@ -217,9 +264,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.16"
-APP_VERSION_TITULO = "PANEL FUNCIONAL"
-APP_VERSION_FECHA = "13/10/2026"
+APP_VERSION = "1.0.17"
+APP_VERSION_TITULO = "FICHAS Y PERMISOS · CANDIDATA"
+APP_VERSION_FECHA = "14/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -4619,6 +4666,7 @@ def teclado_ficha_orma(captura_id):
             InlineKeyboardButton("🚪 ENTRADAS / SALIDAS", callback_data=f"orma_movimientos:{captura_id}"),
         ],
         [InlineKeyboardButton("🛡️ CONTROL TOTAL · MODERACIÓN", callback_data=f"orma_mod:{captura_id}")],
+        [InlineKeyboardButton("🔐 PERMISOS INDIVIDUALES · TELEGRAM", callback_data=f"orma_perm:{captura_id}")],
         [InlineKeyboardButton("📜 AUDITORÍA /ORMA", callback_data=f"orma_audit:{captura_id}")],
         [InlineKeyboardButton("⬅️ CLIENTES EDITADOS", callback_data="orma_clientes_editados:0")],
         [
@@ -4985,7 +5033,7 @@ def _lineas_control_grupo_ficha(captura, grupo, rol):
     elif str(cfg["modo"] or "HEREDADO").upper() == "HEREDADO":
         lineas.append("🌐 Regla: <b>GLOBAL / HEREDADA</b>")
 
-    if len(controlados) == 6:
+    if len(controlados) == 7:
         lineas.append("🎛 Tipos: <b>TODOS LOS PUBLICITARIOS CONTROLADOS</b>")
     elif not controlados:
         lineas.append("🎛 Tipos: <b>SIN TIPOS CONTROLADOS</b>")
@@ -5010,6 +5058,8 @@ async def construir_texto_ficha_orma(captura):
         and len(estados) == TOTAL_GRUPOS_OBLIGATORIOS
         and all(item["miembro"] for item in estados)
     ) if captura["objetivo_tipo"] in {"USUARIO", "BOT"} else None
+    if any(item["error"] for item in estados):
+        habilitado = None
 
     por_grupos = resumen_por_grupos_orma(
         captura["objetivo_tipo"],
@@ -5093,57 +5143,39 @@ async def construir_texto_ficha_orma(captura):
         "Los contadores técnicos siguen registrándose internamente.</i>",
     ])
 
-    texto = "\n".join(lineas)
-    if len(texto) > 4050:
-        texto = texto[:3970] + (
-            "\n\n<i>Ficha abreviada por límite de Telegram. "
-            "Los paneles inferiores conservan el detalle completo.</i>"
-        )
-    return texto
+    return "\n".join(lineas)
 
-async def mostrar_ficha_orma_privada(bot, propietario_id, captura_id):
+async def mostrar_ficha_orma_privada(bot, propietario_id, captura_id, pagina=0):
     captura = obtener_captura_orma(captura_id)
-    if not captura or int(captura["propietario_id"]) != int(propietario_id):
+    if not captura_pertenece_propietario(captura, propietario_id):
         return False
-
-    texto = await construir_texto_ficha_orma(captura)
-    teclado = teclado_ficha_orma(captura_id)
-    panel_id = PANELES_ORMA.get(propietario_id) or obtener_panel_orma_db(propietario_id)
-
-    if panel_id:
-        try:
-            editado = await bot.edit_message_text(
-                chat_id=propietario_id,
-                message_id=panel_id,
-                text=texto,
-                parse_mode="HTML",
-                reply_markup=teclado,
-            )
-            PANELES_ORMA[propietario_id] = editado.message_id
-            guardar_panel_orma_db(propietario_id, editado.message_id)
-            return True
-        except TelegramError as error:
-            if "message is not modified" in str(error).lower():
-                PANELES_ORMA[propietario_id] = panel_id
-                return True
-            logging.info(
-                "Panel /orma previo no reutilizable propietario=%s message_id=%s: %s",
-                propietario_id,
-                panel_id,
-                error,
-            )
-
     try:
-        enviado = await bot.send_message(
-            chat_id=propietario_id,
-            text=texto,
-            parse_mode="HTML",
-            reply_markup=teclado,
-        )
-        PANELES_ORMA[propietario_id] = enviado.message_id
-        guardar_panel_orma_db(propietario_id, enviado.message_id)
+        paginas = paginas_html_panel(await construir_texto_ficha_orma(captura))
+        pagina = max(0, min(int(pagina), len(paginas) - 1))
+        texto = paginas[pagina]
+        filas = []
+        if len(paginas) > 1:
+            texto += f"\n\n📄 <b>Ficha · página {pagina + 1}/{len(paginas)}</b>"
+            controles = []
+            if pagina > 0:
+                controles.append(InlineKeyboardButton("⬅️ PÁGINA ANTERIOR", callback_data=f"orma_ficha_pagina:{captura_id}:{pagina-1}"))
+            if pagina + 1 < len(paginas):
+                controles.append(InlineKeyboardButton("PÁGINA SIGUIENTE ➡️", callback_data=f"orma_ficha_pagina:{captura_id}:{pagina+1}"))
+            filas.append(controles)
+        filas.extend(teclado_ficha_orma(captura_id).inline_keyboard)
+        teclado = InlineKeyboardMarkup(filas)
+        panel_id = PANELES_ORMA.get(propietario_id) or obtener_panel_orma_db(propietario_id)
+        if panel_id:
+            resultado = await safe_edit_message_text(bot, chat_id=propietario_id,
+                message_id=panel_id, text=texto, parse_mode="HTML", reply_markup=teclado)
+            if resultado is not None:
+                registrar_panel_reemplazo(propietario_id, resultado)
+            return True
+        enviado = await bot.send_message(chat_id=propietario_id, text=texto,
+            parse_mode="HTML", reply_markup=teclado)
+        registrar_panel_reemplazo(propietario_id, enviado)
         return True
-    except TelegramError:
+    except Exception:
         logging.exception("No se pudo abrir ficha /orma para %s", propietario_id)
         return False
 
@@ -5791,7 +5823,234 @@ async def eliminar_origen_supervision_callback(update, context):
         )
 
 
-CALLBACKS_FICHA = ('orma_ficha:', 'orma_membresia:', 'orma_actividad:', 'orma_movimientos:', 'orma_audit:', 'orma_pg_lista:', 'orma_pg:', 'orma_pgm:', 'orma_pgmset:', 'orma_pgs:', 'orma_pgsset:', 'orma_pgl:', 'orma_pgnolim:', 'orma_pgt:', 'orma_pgtog:', 'orma_pgr:', 'orma_pgin:', 'orma_mod:', 'orma_modacc:', 'orma_modtog:', 'orma_modall:', 'orma_modnone:', 'orma_modnext:', 'orma_moddur:', 'orma_modgo:', 'orma_publicidad:', 'orma_pub_modo:', 'orma_pub_setmodo:', 'orma_pub_sep:', 'orma_pub_setsep:', 'orma_pub_limites:', 'orma_pub_sinlimites:', 'orma_pub_tipos:', 'orma_pub_texto_simple:', 'orma_pub_texto_apply:', 'orma_pub_toggle:', 'orma_pub_reset:', 'orma_pub_input:', 'orma_pub_cancelinput:')
+# Permisos nativos individuales: borrador privado, nunca permisos generales.
+PERMISOS_INDIVIDUALES = (
+    ("can_send_messages", "ENVIAR MENSAJES"),
+    ("can_send_photos", "FOTOS"),
+    ("can_send_videos", "VIDEOS"),
+    ("can_send_video_notes", "VIDEOMENSAJES"),
+    ("can_send_audios", "MÚSICA / AUDIO"),
+    ("can_send_voice_notes", "MENSAJES DE VOZ"),
+    ("can_send_documents", "ARCHIVOS"),
+    ("can_send_other_messages", "STICKERS / GIF / INLINE"),
+    ("can_add_web_page_previews", "VISTAS PREVIAS DE ENLACES"),
+    ("can_send_polls", "ENCUESTAS"),
+    ("can_react_to_messages", "REACCIONES"),
+    ("can_invite_users", "AÑADIR USUARIOS"),
+    ("can_pin_messages", "FIJAR MENSAJES"),
+    ("can_edit_tag", "EDITAR ETIQUETA PROPIA"),
+    ("can_change_info", "EDITAR INFORMACIÓN"),
+    ("can_manage_topics", "GESTIONAR TEMAS"),
+)
+BORRADORES_PERMISOS = {}
+
+
+def texto_permiso_borrador(valor):
+    return "➖ MANTENER" if valor is None else ("✅ PERMITIR" if valor else "🚫 BLOQUEAR")
+
+
+def teclado_grupos_permisos(captura_id, estado):
+    filas = [[InlineKeyboardButton("✅ SELECCIONAR LOS 12", callback_data=f"orma_permall:{captura_id}"),
+              InlineKeyboardButton("⬜ NINGUNO", callback_data=f"orma_permnone:{captura_id}")]]
+    for indice, nombre, _, _ in GRUPOS_OFICIALES:
+        marca = "✅" if indice in estado["grupos"] else "⬜"
+        filas.append([InlineKeyboardButton(f"{marca} {indice}. {nombre}"[:60], callback_data=f"orma_permg:{captura_id}:{indice}")])
+    filas.extend([
+        [InlineKeyboardButton("CONTINUAR · PERMISOS ➡️", callback_data=f"orma_permnext:{captura_id}")],
+        [InlineKeyboardButton("⬅️ FICHA / CANCELAR", callback_data=f"orma_ficha:{captura_id}")],
+    ])
+    return completar_navegacion_panel(InlineKeyboardMarkup(filas))
+
+
+def teclado_editor_permisos(captura_id, estado):
+    filas = [[InlineKeyboardButton("🎛 MULTIMEDIA · AJUSTE CONJUNTO", callback_data=f"orma_permmedia:{captura_id}")]]
+    for numero, (campo, nombre) in enumerate(PERMISOS_INDIVIDUALES):
+        filas.append([InlineKeyboardButton(f"{texto_permiso_borrador(estado['cambios'].get(campo))} · {nombre}", callback_data=f"orma_permt:{captura_id}:{numero}")])
+    filas.extend([
+        [InlineKeyboardButton("⏱ DURACIÓN", callback_data=f"orma_permtime:{captura_id}")],
+        [InlineKeyboardButton("📋 REVISAR ANTES DE APLICAR", callback_data=f"orma_permreview:{captura_id}")],
+        [InlineKeyboardButton("⬅️ GRUPOS", callback_data=f"orma_perm:{captura_id}")],
+        [InlineKeyboardButton("❌ CANCELAR", callback_data=f"orma_ficha:{captura_id}")],
+    ])
+    return completar_navegacion_panel(InlineKeyboardMarkup(filas))
+
+
+def texto_editor_permisos(captura, estado):
+    duracion = estado["duracion"]
+    plazo = "CONSERVAR PLAZO ACTUAL" if duracion == -1 else ("PERMANENTE" if duracion == 0 else texto_separacion(duracion))
+    return ("🔐 <b>PERMISOS INDIVIDUALES DE TELEGRAM</b>\n\n"
+        + cabecera_identidad_orma(captura)
+        + f"\n\nGrupos seleccionados: <b>{len(estado['grupos'])}/12</b>\nDuración: <b>{plazo}</b>\n\n"
+        "➖ MANTENER conserva el permiso actual de esa persona en cada grupo.\n"
+        "Cada toque alterna MANTENER → BLOQUEAR → PERMITIR. Todavía no aplica cambios.\n"
+        "PERMITIR está sujeto a los permisos generales del grupo; no los modifica.\n"
+        "Telegram agrupa stickers, GIF, juegos y bots inline en un permiso. Enlaces controla la vista previa, no borra URLs.\n"
+        "Fijar mensajes y editar información pueden no aplicarse en supergrupos públicos.\n"
+        "La membresía 12/12 y el control publicitario siguen siendo independientes.")
+
+
+def permisos_actuales_usuario(miembro, chat):
+    estado = str(miembro.status)
+    if estado in {"administrator", "creator"}:
+        raise RuntimeError("No se modifican permisos de administradores o propietarios")
+    if estado not in {"member", "restricted"}:
+        raise RuntimeError("El usuario no es miembro del grupo")
+    if estado == "restricted" and not bool(getattr(miembro, "is_member", False)):
+        raise RuntimeError("El usuario restringido ya no pertenece al grupo")
+    origen = miembro if estado == "restricted" else getattr(chat, "permissions", None)
+    if origen is None:
+        raise RuntimeError("No se pudieron consultar los permisos actuales")
+    datos = {campo: bool(getattr(origen, campo, False)) for campo, _ in PERMISOS_INDIVIDUALES}
+    for campo, dependencia in (("can_react_to_messages", "can_send_messages"), ("can_edit_tag", "can_pin_messages"), ("can_manage_topics", "can_pin_messages")):
+        if getattr(origen, campo, None) is None:
+            datos[campo] = datos[dependencia]
+    return datos
+
+
+async def aplicar_permisos_individuales(bot, propietario_id, captura, estado):
+    resultados = []
+    for indice in sorted(estado["grupos"]):
+        grupo = grupo_orma_por_indice(indice)
+        real = grupo
+        try:
+            chat = await bot.get_chat(grupo["chat_ref"])
+            if chat.type != ChatType.SUPERGROUP:
+                raise RuntimeError("Telegram requiere un supergrupo para esta restricción")
+            real = {**grupo, "chat_id": chat.id, "nombre": chat.title, "username": chat.username}
+            miembro = await bot.get_chat_member(chat.id, int(captura["objetivo_id"]))
+            actuales = permisos_actuales_usuario(miembro, chat)
+            cambios = dict(estado["cambios"])
+            solicitados = {**actuales, **cambios}
+            duracion = estado["duracion"]
+            until_date = 0
+            if duracion > 0:
+                until_date = datetime.now(timezone.utc) + timedelta(seconds=duracion)
+            elif duracion == -1 and str(miembro.status) == "restricted":
+                until_date = getattr(miembro, "until_date", 0) or 0
+                if isinstance(until_date, datetime) and until_date.timestamp() > 0:
+                    if (until_date - datetime.now(timezone.utc)).total_seconds() < 30:
+                        raise RuntimeError("La restricción actual está por vencer; selecciona una duración explícita")
+            await bot.restrict_chat_member(chat_id=chat.id, user_id=int(captura["objetivo_id"]),
+                permissions=ChatPermissions(**solicitados), until_date=until_date,
+                use_independent_chat_permissions=True)
+            despues = await bot.get_chat_member(chat.id, int(captura["objetivo_id"]))
+            comprobados = permisos_actuales_usuario(despues, chat)
+            diferentes = [nombre for campo, nombre in PERMISOS_INDIVIDUALES if comprobados[campo] != solicitados[campo]]
+            if str(despues.status) == "restricted":
+                fecha_real = getattr(despues, "until_date", 0) or 0
+                fecha_real = fecha_real.timestamp() if isinstance(fecha_real, datetime) else int(fecha_real)
+                fecha_pedida = until_date.timestamp() if isinstance(until_date, datetime) else int(until_date)
+                if abs(fecha_real - fecha_pedida) > 3:
+                    diferentes.append("DURACIÓN")
+            detalle = "; ".join(f"{campo}={valor}" for campo, valor in cambios.items())
+            if diferentes:
+                raise RuntimeError("Solicitud enviada; Telegram no confirmó: " + ", ".join(diferentes))
+            registrar_auditoria_orma(propietario_id, captura, "PERMISOS_INDIVIDUALES", grupo=real,
+                detalle=detalle + f"; duración={duracion}", resultado="OK")
+            resultados.append((True, grupo["nombre"], "APLICADOS Y VERIFICADOS"))
+        except Exception as error:
+            registrar_auditoria_orma(propietario_id, captura, "PERMISOS_INDIVIDUALES", grupo=real,
+                detalle="No confirmado; revisar estado actual del grupo", resultado="ERROR", error=str(error))
+            resultados.append((False, grupo["nombre"], str(error)))
+    return resultados
+
+
+async def permisos_individuales_callback(query, usuario, context, data):
+    partes = data.split(":")
+    try:
+        captura_id = int(partes[1]); captura = obtener_captura_orma(captura_id)
+        if not captura_pertenece_propietario(captura, usuario.id):
+            raise ValueError
+    except (ValueError, IndexError, TypeError):
+        await query.answer("Ficha no disponible.", show_alert=True); return
+    if captura["objetivo_tipo"] != "USUARIO" or captura["objetivo_es_bot"]:
+        await query.answer("Esta función es para usuarios, no bots ni canales.", show_alert=True); return
+    estado = BORRADORES_PERMISOS.get(usuario.id)
+    if partes[0] == "orma_perm":
+        if not estado or estado["captura_id"] != captura_id:
+            estado = {"captura_id": captura_id, "grupos": set(), "cambios": {}, "duracion": -1, "confirmacion": False}
+            BORRADORES_PERMISOS[usuario.id] = estado
+    elif not estado or estado["captura_id"] != captura_id:
+        await query.answer("Borrador caducado. Abre PERMISOS INDIVIDUALES nuevamente.", show_alert=True); return
+    accion = partes[0]
+    if accion in {"orma_perm", "orma_permall", "orma_permnone", "orma_permg"}:
+        if accion == "orma_permall": estado["grupos"] = set(range(1, 13))
+        if accion == "orma_permnone": estado["grupos"] = set()
+        if accion == "orma_permg":
+            try:
+                indice = int(partes[2]); assert 1 <= indice <= 12
+            except (ValueError, IndexError, AssertionError):
+                await query.answer("Grupo no válido.", show_alert=True); return
+            if indice in estado["grupos"]: estado["grupos"].remove(indice)
+            else: estado["grupos"].add(indice)
+        estado["confirmacion"] = False
+        await query.answer()
+        await safe_query_edit_message(query, "🔐 <b>PERMISOS INDIVIDUALES · SELECCIONAR GRUPOS</b>\n\n"
+            + cabecera_identidad_orma(captura) + f"\n\nSeleccionados: <b>{len(estado['grupos'])}/12</b>\nSolo afectará a esta persona en los grupos elegidos.",
+            parse_mode="HTML", reply_markup=teclado_grupos_permisos(captura_id, estado)); return
+    if not estado["grupos"]:
+        await query.answer("Selecciona al menos un grupo.", show_alert=True); return
+    if accion == "orma_permt":
+        try:
+            numero = int(partes[2]); assert 0 <= numero < len(PERMISOS_INDIVIDUALES)
+        except (ValueError, IndexError, AssertionError):
+            await query.answer("Permiso no válido.", show_alert=True); return
+        campo = PERMISOS_INDIVIDUALES[numero][0]
+        valor = estado["cambios"].get(campo)
+        if valor is None: estado["cambios"][campo] = False
+        elif valor is False: estado["cambios"][campo] = True
+        else: estado["cambios"].pop(campo, None)
+    if accion == "orma_permmedia":
+        campos = [campo for campo, _ in PERMISOS_INDIVIDUALES[1:11]]
+        valores = [estado["cambios"].get(campo) for campo in campos]
+        nuevo = True if all(v is False for v in valores) else (None if all(v is True for v in valores) else False)
+        for campo in campos:
+            if nuevo is None: estado["cambios"].pop(campo, None)
+            else: estado["cambios"][campo] = nuevo
+    if accion == "orma_permtime":
+        await query.answer()
+        filas = [[InlineKeyboardButton(nombre, callback_data=f"orma_permdur:{captura_id}:{segundos}")] for nombre, segundos in
+            [("CONSERVAR PLAZO ACTUAL", -1), ("PERMANENTE", 0), ("10 MINUTOS", 600), ("1 HORA", 3600), ("24 HORAS", 86400), ("7 DÍAS", 604800)]]
+        filas.append([InlineKeyboardButton("⬅️ PERMISOS", callback_data=f"orma_permnext:{captura_id}")])
+        await safe_query_edit_message(query, "⏱ <b>DURACIÓN DE LA RESTRICCIÓN INDIVIDUAL</b>\n\nConservar mantiene el vencimiento previo de cada grupo; para nuevos usuarios será permanente.",
+            parse_mode="HTML", reply_markup=completar_navegacion_panel(InlineKeyboardMarkup(filas))); return
+    if accion == "orma_permdur":
+        try:
+            segundos = int(partes[2]); assert segundos in {-1, 0, 600, 3600, 86400, 604800}
+        except (ValueError, IndexError, AssertionError):
+            await query.answer("Duración no válida.", show_alert=True); return
+        estado["duracion"] = segundos
+    if accion == "orma_permreview":
+        if not estado["cambios"]:
+            await query.answer("No seleccionaste ningún cambio.", show_alert=True); return
+        estado["confirmacion"] = True
+        resumen = [f"• {nombre}: {texto_permiso_borrador(estado['cambios'][campo])}" for campo, nombre in PERMISOS_INDIVIDUALES if campo in estado["cambios"]]
+        duracion = estado["duracion"]
+        plazo = "CONSERVAR PLAZO ACTUAL" if duracion == -1 else ("PERMANENTE" if duracion == 0 else texto_separacion(duracion))
+        await query.answer()
+        await safe_query_edit_message(query, "⚠️ <b>CONFIRMAR PERMISOS INDIVIDUALES</b>\n\n"
+            + f"Usuario: <b>{html.escape(str(captura['objetivo_nombre'] or '')[:120])}</b> · ID <code>{captura['objetivo_id']}</code>\n"
+            + f"Duración: <b>{plazo}</b>\nGrupos: <b>{len(estado['grupos'])}/12</b>\n\nCAMBIOS:\n" + "\n".join(resumen)
+            + "\n\nGRUPOS:\n" + "\n".join(html.escape(grupo_orma_por_indice(i)["nombre"]) for i in sorted(estado["grupos"])),
+            parse_mode="HTML", reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ APLICAR EN LOS GRUPOS ELEGIDOS", callback_data=f"orma_permgo:{captura_id}")],
+                [InlineKeyboardButton("⬅️ EDITAR / CANCELAR", callback_data=f"orma_permnext:{captura_id}")]]))); return
+    if accion == "orma_permgo":
+        if not estado["confirmacion"] or not estado["cambios"]:
+            await query.answer("Revisa y confirma los cambios antes de aplicarlos.", show_alert=True); return
+        BORRADORES_PERMISOS.pop(usuario.id, None)
+        await query.answer("Aplicando y verificando permisos…")
+        resultados = await aplicar_permisos_individuales(context.bot, usuario.id, captura, estado)
+        await safe_query_edit_message(query, "🔐 <b>RESULTADO POR GRUPO</b>\n\n" + texto_resultados_moderacion(resultados), parse_mode="HTML",
+            reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔐 NUEVO AJUSTE", callback_data=f"orma_perm:{captura_id}")],
+                [InlineKeyboardButton("⬅️ FICHA", callback_data=f"orma_ficha:{captura_id}")]]))); return
+    estado["confirmacion"] = False
+    await query.answer()
+    await safe_query_edit_message(query, texto_editor_permisos(captura, estado), parse_mode="HTML", reply_markup=teclado_editor_permisos(captura_id, estado))
+
+
+CALLBACKS_FICHA = ('orma_ficha_pagina:', 'orma_ficha:', 'orma_membresia:', 'orma_actividad:', 'orma_movimientos:', 'orma_audit:', 'orma_pg_lista:', 'orma_pg:', 'orma_pgm:', 'orma_pgmset:', 'orma_pgs:', 'orma_pgsset:', 'orma_pgl:', 'orma_pgnolim:', 'orma_pgt:', 'orma_pgtog:', 'orma_pgr:', 'orma_pgin:', 'orma_mod:', 'orma_modacc:', 'orma_modtog:', 'orma_modall:', 'orma_modnone:', 'orma_modnext:', 'orma_moddur:', 'orma_modgo:', 'orma_publicidad:', 'orma_pub_modo:', 'orma_pub_setmodo:', 'orma_pub_sep:', 'orma_pub_setsep:', 'orma_pub_limites:', 'orma_pub_sinlimites:', 'orma_pub_tipos:', 'orma_pub_texto_simple:', 'orma_pub_texto_apply:', 'orma_pub_toggle:', 'orma_pub_reset:', 'orma_pub_input:', 'orma_pub_cancelinput:')
 CAMPOS_TIPOS_PANEL = ('controlar_foto', 'controlar_video', 'controlar_gif', 'controlar_documento', 'controlar_enlace', 'controlar_custom_emoji', 'controlar_texto_simple')
 
 
@@ -5805,7 +6064,20 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Acceso no autorizado.", show_alert=True)
         return
 
+    # La entrada manual debe volver al panel privado realmente pulsado.
+    if query.message and query.message.chat_id == usuario.id:
+        registrar_panel_reemplazo(usuario.id, query.message)
+
     data = query.data or ""
+
+    if data.startswith(("orma_perm:", "orma_permall:", "orma_permnone:", "orma_permg:", "orma_permnext:", "orma_permt:", "orma_permmedia:", "orma_permtime:", "orma_permdur:", "orma_permreview:", "orma_permgo:")):
+        ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
+        ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
+        ENTRADAS_RAIZ.pop(usuario.id, None)
+        await permisos_individuales_callback(query, usuario, context, data)
+        return
+    BORRADORES_PERMISOS.pop(usuario.id, None)
+
 
     ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
     ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
@@ -6082,7 +6354,24 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         CAPTURAS_ORMA[usuario.id] = captura_id
         await query.answer()
-        await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id)
+        if not await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id):
+            await safe_query_edit_message(query, "No se pudo abrir la ficha. Puedes volver a intentar desde CLIENTES EDITADOS.",
+                reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CLIENTES EDITADOS", callback_data="orma_clientes_editados:0")]])))
+        return
+
+    if data.startswith("orma_ficha_pagina:"):
+        try:
+            _, captura_txt, pagina_txt = data.split(":")
+            captura_id, pagina = int(captura_txt), int(pagina_txt)
+            if pagina < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            await query.answer("Página no válida.", show_alert=True)
+            return
+        await query.answer()
+        if not await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id, pagina):
+            await safe_query_edit_message(query, "No se pudo abrir la ficha. Puedes volver a intentar desde CLIENTES EDITADOS.",
+                reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CLIENTES EDITADOS", callback_data="orma_clientes_editados:0")]])))
         return
 
     if data.startswith("orma_ficha:"):
@@ -6093,7 +6382,9 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer()
             return
         await query.answer()
-        await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id)
+        if not await mostrar_ficha_orma_privada(context.bot, usuario.id, captura_id):
+            await safe_query_edit_message(query, "No se pudo abrir la ficha. Puedes volver a intentar desde CLIENTES EDITADOS.",
+                reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CLIENTES EDITADOS", callback_data="orma_clientes_editados:0")]])))
         return
 
     if data.startswith("orma_membresia:"):
@@ -8620,7 +8911,7 @@ async def procesar_entrada_control_publicidad(
                     chat_id=usuario.id,
                     text=f"✅ <b>@{html.escape(agregado)}</b> quedó exento de las restricciones de raíz.",
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🤖 VOLVER A BOTS EXENTOS", callback_data="orma_raiz_bots")]]),
+                    reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([[InlineKeyboardButton("🤖 VOLVER A BOTS EXENTOS", callback_data="orma_raiz_bots")]])),
                 )
             except TelegramError:
                 pass

@@ -1,54 +1,83 @@
-# MÁXIMO CONTROL GROUP · candidata v1.0.16
+# Entrega v1.0.17 CANDIDATA · MÁXIMO CONTROL GROUP
 
-Preparada el 13/10/2026 a partir de v1.0.15, commit 238d8768c58a2e5e3eccbdbd063e85d8f1ac8942.
-Estado: APROBADA por autorización expresa del usuario el 13/10/2026. Desplegada en JustRunMy; pruebas reales en Telegram pendientes.
+Fecha: 14/10/2026. Base: R026, código v1.0.16, commit 4454362c8634f1e3c4ac13ca68ac719ad672c63f.
+Estado: candidata verificada localmente, NO desplegada. Compilación y dos auditorías locales realizadas antes de esta entrega.
 
-## Correcciones realizadas
+## Causa y correcciones
 
-1. **Paneles propios por grupo:** añadida la columna faltante de texto simple. Ya no fallan al abrir reglas propias ni al volver después de cambiar modo, separación o límites.
-2. **Texto simple por grupo:** botón nuevo en TIPOS. La clasificación utiliza la regla efectiva del grupo. ILIMITADO y EXCLUIDO liberan este texto del control publicitario; la puerta de membresía 12/12 mantiene su independencia.
-3. **Conservación de reglas:** la migración copia a las reglas propias existentes su excepción anterior de texto, sin borrar registros. Es idempotente. Copiar una regla global conserva su ancla diaria; volver a pulsar PERSONALIZADO no sobrescribe una regla propia.
-4. **Contadores diarios:** los paneles global e individual usan el mismo ciclo anclado de 24 horas que el motor de límites. Los contadores históricos generales siguen siendo estadísticas.
-5. **Navegación:** las pantallas secundarias editadas desde el panel añaden MENÚ PRINCIPAL y CERRAR si faltan. Se mantienen los regresos y cancelaciones existentes. La ficha incorpora regreso a CLIENTES EDITADOS. Los paneles de supervisión conservan sus botones originales.
-6. **Cancelación efectiva:** navegar, cancelar, regresar, cerrar o ir al menú limpia las entradas manuales pendientes. Un número posterior ya no modifica una pantalla abandonada.
-7. **Paneles duplicados:** una edición sin cambios se considera resuelta. Si el panel desapareció o no puede editarse, se crea reemplazo y se guarda su ID para las siguientes entradas manuales. Otros errores no se disfrazan creando paneles nuevos.
-8. **Errores de entrada:** los valores manuales inválidos por grupo, mute y username exento muestran explicación y salida. Se aclara que 0 bloquea un límite, pero elimina una separación.
-9. **Validación del panel:** se valida la pertenencia de la ficha al administrador antes de despachar sus botones; se rechazan grupos, tipos, modos, campos y acciones inválidos. Las entradas privadas requieren autorización administrativa actual. Si no se resuelve un grupo, no se escribe chat_id vacío.
-10. **Moderación:** DESMUTEAR requiere leer los permisos reales del grupo; no inventa permisos si la consulta falla. La selección se consume al confirmar una operación para evitar repetirla usando una confirmación vieja.
-11. **Información coherente:** se incluye texto simple en el resumen de tipos de la ficha. Las pantallas que no comprueban los doce grupos no afirman que la pertenencia a un solo grupo acredita 12/12.
-12. **Base de datos:** las conexiones utilizadas mediante contexto se cierran al terminar y conservan el comportamiento de commit/rollback.
+La regresión de v1.0.16 alargó las fichas y activó un recorte inseguro que podía dejar una etiqueta HTML abierta. RETROCEDER y cada cliente intentaban mostrar la misma ficha, por eso parecían botones inactivos.
 
-## Verificación local
+1. Eliminado el recorte por posición de caracteres. Las fichas completas se dividen en páginas con etiquetas y entidades intactas, cierre/reapertura de formato y límite conservador medido en unidades UTF-16.
+2. Botones PÁGINA ANTERIOR / PÁGINA SIGUIENTE cuando corresponden. Se conserva todo el texto y los doce grupos. Se mantienen accesos a actualizar, membresía, actividad, publicidad, movimientos, moderación, auditoría, clientes, menú principal y cerrar en cada página.
+3. RETROCEDER desde publicidad y apertura desde CLIENTES EDITADOS usan la misma ruta segura de ficha, con seguimiento del ID del panel, reutilización y reemplazo controlado si desapareció.
+4. Los otros paneles HTML también tienen abreviación segura si superan el límite; los detalles siguen disponibles en sus paneles. No se vuelve a cortar una etiqueta por un índice arbitrario.
+5. Si no se consigue mostrar una ficha, aparece una explicación y acceso a CLIENTES EDITADOS / MENÚ PRINCIPAL / CERRAR, en vez de dejar un fallo silencioso.
+6. Corregido el resumen de tipos: ahora cuenta los siete tipos que muestra, incluido texto simple.
+7. Un error al consultar roles no se presenta como una comprobación negativa definitiva de 12/12 en la ficha.
+8. Las entradas manuales se dirigen al panel privado realmente pulsado. La confirmación de agregar un bot exento también incorpora MENÚ PRINCIPAL y CERRAR.
 
-- Sintaxis de todos los módulos Python: correcta.
-- Migración ejecutada dos veces sobre copia del respaldo: correcta e idempotente.
-- Integridad SQLite después de migrar: OK.
-- Comparación completa de filas originales de usuarios, doce grupos, bots exentos, eventos de publicidad, eventos de membresía y perfiles individuales antes de las pruebas: idénticas.
-- 167 escenarios de callbacks con Telegram simulado: correctos. Incluyen doce grupos, reglas heredadas y propias, modos, separación, límites, tipos, entradas y cancelaciones, raíz, moderación y callbacks inválidos.
-- Motor de texto simple: probado restringido/libre por grupo y liberación por ILIMITADO/EXCLUIDO.
-- MUTE, UNMUTE, BAN, UNBAN y EXPULSAR: llamadas simuladas y auditoría verificadas. UNMUTE sin permisos informados falla de forma controlada.
-- Edición repetida: no crea mensaje adicional. Panel inexistente: guarda ID del reemplazo.
-- Dockerfile, requirements y agente remoto: byte a byte idénticos al respaldo.
-- Puerta 12/12, consultas de membresía, anti-evasión, barrera de comandos, replicación, excepciones oficiales, borrado desde supervisión y registro principal de handlers: funciones comparadas y conservadas.
+## Permisos individuales solicitados durante la revisión
 
-Las pruebas ejecutan las funciones del código con objetos simulados; no establecen una conexión con Telegram ni certifican permisos reales. No se ha hecho una prueba real con la biblioteca instalada en JustRunMy.
+Se incorpora PERMISOS INDIVIDUALES · TELEGRAM en la ficha. Afecta al usuario seleccionado en un grupo, varios elegidos o los doce; no modifica los permisos generales de sus miembros.
 
-## Alcance y límites
+- 16 opciones nativas: mensajes, fotos, videos, videomensajes, música/audio, voz, archivos, stickers/GIF/inline, vistas previas de enlaces, encuestas, reacciones, invitar usuarios, fijar mensajes, etiqueta propia, información y temas.
+- Tres estados por opción: MANTENER (conserva el permiso actual por grupo), BLOQUEAR y PERMITIR. Ajuste conjunto para multimedia.
+- Selección de grupos, duración, resumen completo y confirmación. Cancelar no ejecuta cambios. La confirmación se consume; un segundo clic no repite la operación.
+- Duración: conservar el plazo previo, permanente, 10 minutos, 1 hora, 24 horas o 7 días. Se rechaza conservar un vencimiento a menos de 30 segundos para evitar convertirlo accidentalmente en permanente.
+- Aplicación real mediante restrict_chat_member con use_independent_chat_permissions=True; después vuelve a consultar get_chat_member y compara permisos y duración. Solo informa APLICADOS Y VERIFICADOS si coinciden; cada grupo registra resultado y auditoría.
+- No modifica bots, canales, administradores, propietarios ni usuarios fuera del grupo. Si Telegram rechaza la solicitud, el grupo no se resuelve o la comprobación difiere, lo informa sin afirmar éxito.
+- PERMITIR está sujeto a las reglas generales del grupo. Telegram agrupa stickers/GIF/juegos/inline; la opción de enlaces controla vistas previas. Algunos permisos son ignorados en supergrupos públicos; en ese caso se informa cualquier diferencia de comprobación.
+- La membresía 12/12 y los controles publicitarios conservan su aplicación independiente: permitir un formato nativo no desactiva esos controles.
 
-El paquete contiene código y metadatos; NO incluye maximo_control.db, NO restaura una base ni contiene historial Git. Debe aplicarse sobre el repositorio existente conservando .git y la base activa. El primer inicio añade una columna; no elimina datos. Para volver a v1.0.15 se puede recuperar el código anterior: la columna adicional es compatible con sus consultas.
+Referencia técnica: https://core.telegram.org/bots/api#restrictchatmember y https://core.telegram.org/bots/api#chatpermissions
 
-Se conserva el comportamiento previo de la puerta 12/12 ante errores de Telegram (un fallo puede considerarse grupo faltante). Sigue siendo un riesgo conocido del motor de membresía; no se cambió esa política para mantener las restricciones existentes mientras se valida el panel.
+## Auditoría 1 — funcional
 
-La autorización de PublicidadContratada_bot permanece protegida. No se cambiaron credenciales, destinos, reglas raíz, mensajes de supervisión ni conexiones de servidores.
+Se importó el módulo candidato con python-telegram-bot 22.8 real, instalado únicamente en una carpeta local de pruebas. Las respuestas del servidor Telegram se simularon. No se usaron credenciales reales ni se contactó al bot activo.
 
-## Validación real requerida en JustRunMy
+- Apertura completa de los **105 clientes** de R026: PASS.
+- RETROCEDER desde publicidad para esos **105 clientes**: PASS.
+- Navegación de **210 páginas** generadas para las fichas de miembros: PASS.
+- **1232 acciones de callbacks** y **1294 pantallas**: PASS.
+- Todas las ramas exactas y prefijos declarados del controlador /orma tienen al menos un recorrido ejecutado: PASS. Esto es cobertura de rutas, no prueba exhaustiva de todas las combinaciones posibles de datos externos.
+- Lista de clientes: todas sus páginas; ficha; membresía; actividad; movimientos; auditoría; raíz; grupos; bots; tiempos; laboratorio; reglas: PASS.
+- Controles por grupo: los doce grupos, modos, separaciones, límites, tipos, herencia, cancelación y regreso: PASS.
+- Entradas manuales de los seis campos globales y de cada grupo; valor inválido; cancelación; texto posterior a cancelar: PASS.
+- Moderación simulada: selección de doce grupos, MUTE, UNMUTE, BAN, UNBAN, EXPULSAR y rechazo de una confirmación reutilizada: PASS.
+- Mute manual positivo e inválido; alta/baja de una exención de prueba: PASS.
+- Miembro, fuera, restringido, administrador y errores de consulta; grupo no resoluble; permisos desconocidos para desmute; ficha inexistente y acceso ajeno: PASS.
+- Panel sin cambios: no duplica; panel inexistente: guarda reemplazo; cerrar: limpia estado: PASS.
+- Inicialización doble sobre la base en memoria: integridad OK y comparación de todas las filas de usuarios, grupos, exenciones, reglas individuales, reglas por grupo y eventos antes de las acciones simuladas: conservadas.
+- Auditoría adicional de permisos nativos: **96 casos**, **386 acciones** y **383 pantallas**. Los 16 permisos se verificaron en los estados mantener/bloquear/permitir; aplicación en un grupo y en doce; preservación de otros campos; todos los plazos; cancelación; repetición; errores y discrepancias simulados.
 
-1. Abrir CLIENTES EDITADOS y una ficha existente. Recorrer membresía, actividad, publicidad, movimientos y auditoría.
-2. Recorrer los doce controles de grupo. Configurar una prueba propia; entrar y regresar de modo, separación, límites y tipos. Confirmar que no desaparece ni se duplica el panel.
-3. Con una identidad de prueba que tenga 12/12, comparar texto simple restringido, libre, ILIMITADO y EXCLUIDO. Verificar que el cambio de un grupo no afecta a los otros once.
-4. Introducir un valor inválido; corregirlo. Después cancelar una entrada y escribir un número: no debe cambiar ningún límite.
-5. Verificar cupo 0, cupo positivo y reloj diario; pulsar PERSONALIZADO de nuevo y confirmar conservación de valores.
-6. Comprobar regreso, menú principal y cerrar en pantallas secundarias; comprobar moderación solo sobre identidad y grupo de prueba. Verificar que una confirmación usada no repite la acción.
-7. Comprobar autorización de bots oficiales, publicación de Publicidad Contratada, copias de supervisión y borrado puntual de origen. Reiniciar y verificar persistencia.
+## Auditoría 2 — interfaz
 
-GitHub y respaldo aprobado de Oracle únicamente después de tu aprobación explícita de estas pruebas. El respaldo de código es distinto del de base de datos.
+Se ejecutó aparte de la auditoría funcional, usando el mismo candidato final.
+
+- **105 clientes × 5 estados = 525 variantes** de ficha.
+- **945 páginas** comprobadas: ninguna etiqueta abierta, ninguna etiqueta desordenada, ningún exceso de longitud.
+- Comparación del texto visible completo contra la concatenación de páginas: ningún contenido perdido.
+- Pruebas adicionales con nombres/textos largos, emojis, entidades, enlaces, cursivas y código: correctas.
+- Teclados reales de PTB: objetos válidos, callbacks de 1–64 bytes, menú principal y cerrar en las pantallas privadas auditadas.
+- Pantallas largas: paginación, continuidad del formato y rutas de regreso disponibles.
+- Interfaz del nuevo panel: selección de grupos, sus 16 opciones, duración y confirmación; **22 pantallas** adicionales. El resumen completo conserva los doce nombres de grupos y los dieciséis cambios, sin abreviarlos.
+
+La auditoría de interfaz comprueba el contenido y los teclados generados; no es una sesión visual en Telegram Desktop. Se incluye una representación HTML local de las fichas para revisar su estructura. Los permisos, latencia, disponibilidad de Telegram y apariencia final del cliente requieren prueba real en JustRunMy.
+
+## Conservación de lo existente
+
+Se compararon **17 funciones protegidas** con R026 mediante su estructura sintáctica: sin cambios. Incluyen puerta 12/12, consulta de membresía, motor publicitario, reglas/cupos, anti-evasión, barrera de comandos, moderación, supervisión, borrado puntual, exenciones e inicio/handlers.
+
+Dockerfile, requirements y agente remoto se conservaron byte a byte. No se cambiaron credenciales, destinos, reglas almacenadas ni autorizaciones de bots oficiales.
+
+El riesgo previo del motor de membresía ante errores de Telegram se conserva; esta entrega no altera esa política. El estado mostrado por la ficha sí distingue la consulta no comprobada.
+
+## Paquete y siguiente paso
+
+El ZIP contiene los siete archivos de código/metadatos. **No contiene maximo_control.db, no restaura bases y no sustituye .git.** No requiere una nueva migración respecto de v1.0.16. Aplicar sobre el repositorio existente.
+
+Orden: comprobar hash y compilar en tu laptop; desplegar candidata solo en JustRunMy; comprobar clientes, regresos y paginación en Telegram; esperar tu aprobación; después GitHub, sincronización y respaldo aprobado en Oracle. Un respaldo de código es distinto del completo de base.
+
+Primera prueba real: abrir Joaquín desde CLIENTES EDITADOS, recorrer ambas páginas de ficha, entrar a publicidad, pulsar RETROCEDER, volver a CLIENTES EDITADOS, abrir otro cliente y comprobar MENÚ PRINCIPAL / CERRAR. Después revisar los controles de grupo y una operación de moderación únicamente en el grupo de pruebas.
+
+No se declara “100 % operativo en producción” sin haber hecho esas pruebas reales. En las dos auditorías locales descritas no quedaron fallos pendientes.

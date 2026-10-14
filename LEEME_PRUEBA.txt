@@ -1,83 +1,43 @@
-# Entrega v1.0.17 CANDIDATA · MÁXIMO CONTROL GROUP
+# v1.0.17 · REVISIÓN 2 · filtro de membresía en permisos individuales
 
-Fecha: 14/10/2026. Base: R026, código v1.0.16, commit 4454362c8634f1e3c4ac13ca68ac719ad672c63f.
-Estado: candidata verificada localmente, NO desplegada. Compilación y dos auditorías locales realizadas antes de esta entrega.
+14/10/2026. Se mantiene v1.0.17 por solicitud expresa. Base: candidata c885c1f entregada anteriormente. No desplegada.
 
-## Causa y correcciones
+## Mejora incluida
 
-La regresión de v1.0.16 alargó las fichas y activó un recorte inseguro que podía dejar una etiqueta HTML abierta. RETROCEDER y cada cliente intentaban mostrar la misma ficha, por eso parecían botones inactivos.
+- Al abrir PERMISOS INDIVIDUALES se consulta la pertenencia actual del usuario a los doce grupos.
+- Cada grupo indica MIEMBRO, NO ES MIEMBRO, ADMINISTRADOR o NO COMPROBADO.
+- Solo los miembros confirmados que no son administradores pueden seleccionarse. Los restringidos se consideran miembros únicamente si is_member es verdadero.
+- SELECCIONAR DISPONIBLES sustituye a SELECCIONAR LOS 12. Si está en tres grupos, selecciona solo esos tres.
+- Un grupo no disponible muestra su motivo y su botón no lo agrega a la selección.
+- ACTUALIZAR MEMBRESÍA permite detectar entradas, salidas y recuperación de consultas fallidas.
+- Se vuelve a consultar al revisar la confirmación y justo antes de aplicar. La selección solo se reduce; nunca se añaden nuevos grupos sin seleccionarlos.
+- Si el usuario salió, fue promovido a administrador o no se pudo verificar un grupo después de confirmar, se omite, no se envía restrict_chat_member y se registra el motivo.
+- Se conserva la comprobación adicional que ya existía inmediatamente antes de restringir cada grupo y la verificación de permisos tras aplicar.
 
-1. Eliminado el recorte por posición de caracteres. Las fichas completas se dividen en páginas con etiquetas y entidades intactas, cierre/reapertura de formato y límite conservador medido en unidades UTF-16.
-2. Botones PÁGINA ANTERIOR / PÁGINA SIGUIENTE cuando corresponden. Se conserva todo el texto y los doce grupos. Se mantienen accesos a actualizar, membresía, actividad, publicidad, movimientos, moderación, auditoría, clientes, menú principal y cerrar en cada página.
-3. RETROCEDER desde publicidad y apertura desde CLIENTES EDITADOS usan la misma ruta segura de ficha, con seguimiento del ID del panel, reutilización y reemplazo controlado si desapareció.
-4. Los otros paneles HTML también tienen abreviación segura si superan el límite; los detalles siguen disponibles en sus paneles. No se vuelve a cortar una etiqueta por un índice arbitrario.
-5. Si no se consigue mostrar una ficha, aparece una explicación y acceso a CLIENTES EDITADOS / MENÚ PRINCIPAL / CERRAR, en vez de dejar un fallo silencioso.
-6. Corregido el resumen de tipos: ahora cuenta los siete tipos que muestra, incluido texto simple.
-7. Un error al consultar roles no se presenta como una comprobación negativa definitiva de 12/12 en la ficha.
-8. Las entradas manuales se dirigen al panel privado realmente pulsado. La confirmación de agregar un bot exento también incorpora MENÚ PRINCIPAL y CERRAR.
+## Auditoría funcional
 
-## Permisos individuales solicitados durante la revisión
+- Caso específico: usuario solo en grupos 5, 6 y 7. El selector detecta exactamente tres y no permite elegir los otros nueve.
+- Salida después de confirmar: se aplicó únicamente a los dos grupos restantes. Cero solicitudes de restricción a grupos ausentes.
+- Actualización: nuevas membresías detectadas; errores, administradores y restringidos que ya no pertenecen quedan excluidos.
+- Todos los grupos seleccionados pasan a ausentes: la operación se detiene sin solicitudes de restricción.
+- 12 casos específicos de membresía: PASS.
+- Auditoría general repetida: 1233 acciones de callbacks; apertura de los 105 clientes y sus regresos; 210 páginas de ficha. PASS.
+- Permisos individuales: 96 casos y 386 acciones sobre los 16 permisos, plazos, aplicación individual y a doce grupos. PASS.
+- Integridad y conservación de la base en memoria, inicialización doble y compilación: PASS.
 
-Se incorpora PERMISOS INDIVIDUALES · TELEGRAM en la ficha. Afecta al usuario seleccionado en un grupo, varios elegidos o los doce; no modifica los permisos generales de sus miembros.
+## Auditoría de interfaz
 
-- 16 opciones nativas: mensajes, fotos, videos, videomensajes, música/audio, voz, archivos, stickers/GIF/inline, vistas previas de enlaces, encuestas, reacciones, invitar usuarios, fijar mensajes, etiqueta propia, información y temas.
-- Tres estados por opción: MANTENER (conserva el permiso actual por grupo), BLOQUEAR y PERMITIR. Ajuste conjunto para multimedia.
-- Selección de grupos, duración, resumen completo y confirmación. Cancelar no ejecuta cambios. La confirmación se consume; un segundo clic no repite la operación.
-- Duración: conservar el plazo previo, permanente, 10 minutos, 1 hora, 24 horas o 7 días. Se rechaza conservar un vencimiento a menos de 30 segundos para evitar convertirlo accidentalmente en permanente.
-- Aplicación real mediante restrict_chat_member con use_independent_chat_permissions=True; después vuelve a consultar get_chat_member y compara permisos y duración. Solo informa APLICADOS Y VERIFICADOS si coinciden; cada grupo registra resultado y auditoría.
-- No modifica bots, canales, administradores, propietarios ni usuarios fuera del grupo. Si Telegram rechaza la solicitud, el grupo no se resuelve o la comprobación difiere, lo informa sin afirmar éxito.
-- PERMITIR está sujeto a las reglas generales del grupo. Telegram agrupa stickers/GIF/juegos/inline; la opción de enlaces controla vistas previas. Algunos permisos son ignorados en supergrupos públicos; en ese caso se informa cualquier diferencia de comprobación.
-- La membresía 12/12 y los controles publicitarios conservan su aplicación independiente: permitir un formato nativo no desactiva esos controles.
+- Auditoría ejecutada aparte: 105 clientes × cinco estados = 525 variantes; 945 páginas válidas, sin pérdidas de texto ni exceso de longitud.
+- 22 pantallas de permisos revisadas, más 11 pantallas del caso de membresía parcial.
+- Contadores presente/12 y seleccionado/disponible, etiquetas por grupo, actualizar, continuar, regresar, menú principal y cerrar: PASS.
+- Formato HTML y datos de botones con python-telegram-bot 22.8 real: PASS.
 
-Referencia técnica: https://core.telegram.org/bots/api#restrictchatmember y https://core.telegram.org/bots/api#chatpermissions
+Ambas auditorías son locales, con respuestas Telegram simuladas; no son pruebas en los grupos reales. La prueba real debe confirmar que Juan2 aparece solo en sus tres grupos y que el resultado coincide con Telegram.
 
-## Auditoría 1 — funcional
+## Conservado
 
-Se importó el módulo candidato con python-telegram-bot 22.8 real, instalado únicamente en una carpeta local de pruebas. Las respuestas del servidor Telegram se simularon. No se usaron credenciales reales ni se contactó al bot activo.
+Respecto de la candidata anterior solo cambian tres funciones del selector/controlador de permisos y se añaden dos auxiliares. El ejecutor de permisos, los dieciséis campos, duración, cancelación, fichas paginadas, reglas publicitarias, puerta 12/12, moderación, exenciones, datos y supervisión se conservan. Dockerfile, agente remoto y dependencias son idénticos.
 
-- Apertura completa de los **105 clientes** de R026: PASS.
-- RETROCEDER desde publicidad para esos **105 clientes**: PASS.
-- Navegación de **210 páginas** generadas para las fichas de miembros: PASS.
-- **1232 acciones de callbacks** y **1294 pantallas**: PASS.
-- Todas las ramas exactas y prefijos declarados del controlador /orma tienen al menos un recorrido ejecutado: PASS. Esto es cobertura de rutas, no prueba exhaustiva de todas las combinaciones posibles de datos externos.
-- Lista de clientes: todas sus páginas; ficha; membresía; actividad; movimientos; auditoría; raíz; grupos; bots; tiempos; laboratorio; reglas: PASS.
-- Controles por grupo: los doce grupos, modos, separaciones, límites, tipos, herencia, cancelación y regreso: PASS.
-- Entradas manuales de los seis campos globales y de cada grupo; valor inválido; cancelación; texto posterior a cancelar: PASS.
-- Moderación simulada: selección de doce grupos, MUTE, UNMUTE, BAN, UNBAN, EXPULSAR y rechazo de una confirmación reutilizada: PASS.
-- Mute manual positivo e inválido; alta/baja de una exención de prueba: PASS.
-- Miembro, fuera, restringido, administrador y errores de consulta; grupo no resoluble; permisos desconocidos para desmute; ficha inexistente y acceso ajeno: PASS.
-- Panel sin cambios: no duplica; panel inexistente: guarda reemplazo; cerrar: limpia estado: PASS.
-- Inicialización doble sobre la base en memoria: integridad OK y comparación de todas las filas de usuarios, grupos, exenciones, reglas individuales, reglas por grupo y eventos antes de las acciones simuladas: conservadas.
-- Auditoría adicional de permisos nativos: **96 casos**, **386 acciones** y **383 pantallas**. Los 16 permisos se verificaron en los estados mantener/bloquear/permitir; aplicación en un grupo y en doce; preservación de otros campos; todos los plazos; cancelación; repetición; errores y discrepancias simulados.
+El paquete contiene siete archivos de código y metadatos. No incluye base de datos, no restaura datos, no modifica .git y no aplica nueva migración. VERSION y APP_VERSION continúan en 1.0.17; VERSION_INFO identifica revision=2 y estado CANDIDATE.
 
-## Auditoría 2 — interfaz
-
-Se ejecutó aparte de la auditoría funcional, usando el mismo candidato final.
-
-- **105 clientes × 5 estados = 525 variantes** de ficha.
-- **945 páginas** comprobadas: ninguna etiqueta abierta, ninguna etiqueta desordenada, ningún exceso de longitud.
-- Comparación del texto visible completo contra la concatenación de páginas: ningún contenido perdido.
-- Pruebas adicionales con nombres/textos largos, emojis, entidades, enlaces, cursivas y código: correctas.
-- Teclados reales de PTB: objetos válidos, callbacks de 1–64 bytes, menú principal y cerrar en las pantallas privadas auditadas.
-- Pantallas largas: paginación, continuidad del formato y rutas de regreso disponibles.
-- Interfaz del nuevo panel: selección de grupos, sus 16 opciones, duración y confirmación; **22 pantallas** adicionales. El resumen completo conserva los doce nombres de grupos y los dieciséis cambios, sin abreviarlos.
-
-La auditoría de interfaz comprueba el contenido y los teclados generados; no es una sesión visual en Telegram Desktop. Se incluye una representación HTML local de las fichas para revisar su estructura. Los permisos, latencia, disponibilidad de Telegram y apariencia final del cliente requieren prueba real en JustRunMy.
-
-## Conservación de lo existente
-
-Se compararon **17 funciones protegidas** con R026 mediante su estructura sintáctica: sin cambios. Incluyen puerta 12/12, consulta de membresía, motor publicitario, reglas/cupos, anti-evasión, barrera de comandos, moderación, supervisión, borrado puntual, exenciones e inicio/handlers.
-
-Dockerfile, requirements y agente remoto se conservaron byte a byte. No se cambiaron credenciales, destinos, reglas almacenadas ni autorizaciones de bots oficiales.
-
-El riesgo previo del motor de membresía ante errores de Telegram se conserva; esta entrega no altera esa política. El estado mostrado por la ficha sí distingue la consulta no comprobada.
-
-## Paquete y siguiente paso
-
-El ZIP contiene los siete archivos de código/metadatos. **No contiene maximo_control.db, no restaura bases y no sustituye .git.** No requiere una nueva migración respecto de v1.0.16. Aplicar sobre el repositorio existente.
-
-Orden: comprobar hash y compilar en tu laptop; desplegar candidata solo en JustRunMy; comprobar clientes, regresos y paginación en Telegram; esperar tu aprobación; después GitHub, sincronización y respaldo aprobado en Oracle. Un respaldo de código es distinto del completo de base.
-
-Primera prueba real: abrir Joaquín desde CLIENTES EDITADOS, recorrer ambas páginas de ficha, entrar a publicidad, pulsar RETROCEDER, volver a CLIENTES EDITADOS, abrir otro cliente y comprobar MENÚ PRINCIPAL / CERRAR. Después revisar los controles de grupo y una operación de moderación únicamente en el grupo de pruebas.
-
-No se declara “100 % operativo en producción” sin haber hecho esas pruebas reales. En las dos auditorías locales descritas no quedaron fallos pendientes.
+Descargar, verificar hash y compilar antes de aplicar al repositorio. Primero JustRunMy para prueba real; GitHub y Oracle quedan sujetos a aprobación. No se desplegó nada durante esta entrega.

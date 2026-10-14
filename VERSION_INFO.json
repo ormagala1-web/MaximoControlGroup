@@ -8,10 +8,10 @@
   "timezone": "America/Lima",
   "updated_at": "14/10/2026",
   "title": "FICHAS Y PERMISOS",
-  "live_validation": "PENDING_JUSTRUNMY",
+  "live_validation": "PENDING_JUSTRUNMY_REV2",
   "database_migration": [],
   "functional_audit": {
-    "callbacks": 1232,
+    "callbacks": 1233,
     "screens": 1294,
     "client_openings": 105,
     "pages": 210,
@@ -74,5 +74,18 @@
     "permisos_actuales_usuario",
     "aplicar_permisos_individuales",
     "permisos_individuales_callback"
-  ]
+  ],
+  "revision": 2,
+  "revision_base_commit": "c885c1f",
+  "revision_scope": "Filtro de membresía actual en permisos individuales",
+  "membership_audit": {
+    "cases": 12,
+    "writes_absent": 0,
+    "eligible_groups": [
+      5,
+      6,
+      7
+    ],
+    "ui_checks": 11
+  }
 }

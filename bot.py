@@ -5849,13 +5849,48 @@ def texto_permiso_borrador(valor):
     return "➖ MANTENER" if valor is None else ("✅ PERMITIR" if valor else "🚫 BLOQUEAR")
 
 
+async def actualizar_grupos_usuario_permisos(bot, captura, estado):
+    async def consultar(indice):
+        grupo = grupo_orma_por_indice(indice)
+        try:
+            miembro = await bot.get_chat_member(grupo["chat_ref"], int(captura["objetivo_id"]))
+            rol = str(miembro.status)
+            if rol in {"administrator", "creator"}:
+                return indice, "ADMINISTRADOR", True, False
+            presente = estado_es_miembro(miembro)
+            return indice, ("MIEMBRO" if presente else "NO ES MIEMBRO"), presente, presente
+        except TelegramError:
+            return indice, "NO COMPROBADO", False, False
+    consultas = await asyncio.gather(*(consultar(i) for i in range(1, TOTAL_GRUPOS_OBLIGATORIOS + 1)))
+    estado["estados_grupos"] = {i: etiqueta for i, etiqueta, _, _ in consultas}
+    estado["presentes"] = {i for i, _, presente, _ in consultas if presente}
+    estado["disponibles"] = {i for i, _, _, permitido in consultas if permitido}
+    estado["grupos"].intersection_update(estado["disponibles"])
+
+
+def resumen_membresia_selector_permisos(estado):
+    errores = sum(v == "NO COMPROBADO" for v in estado["estados_grupos"].values())
+    return (f"Miembro confirmado: <b>{len(estado['presentes'])}/12</b>\n"
+        f"Grupos donde puede restringirse: <b>{len(estado['disponibles'])}</b>\n"
+        f"Seleccionados: <b>{len(estado['grupos'])}/{len(estado['disponibles'])}</b>\n"
+        f"Sin comprobar: <b>{errores}</b>\n"
+        "Los grupos ausentes, administrados o no comprobados no se seleccionan.")
+
+
 def teclado_grupos_permisos(captura_id, estado):
-    filas = [[InlineKeyboardButton("✅ SELECCIONAR LOS 12", callback_data=f"orma_permall:{captura_id}"),
+    filas = [[InlineKeyboardButton(f"✅ SELECCIONAR DISPONIBLES ({len(estado['disponibles'])})", callback_data=f"orma_permall:{captura_id}"),
               InlineKeyboardButton("⬜ NINGUNO", callback_data=f"orma_permnone:{captura_id}")]]
     for indice, nombre, _, _ in GRUPOS_OFICIALES:
-        marca = "✅" if indice in estado["grupos"] else "⬜"
-        filas.append([InlineKeyboardButton(f"{marca} {indice}. {nombre}"[:60], callback_data=f"orma_permg:{captura_id}:{indice}")])
+        if indice in estado["disponibles"]:
+            marca = "✅" if indice in estado["grupos"] else "⬜"
+            etiqueta = f"{marca} {indice}. {nombre}"
+            callback = f"orma_permg:{captura_id}:{indice}"
+        else:
+            etiqueta = f"🚫 {indice}. {estado['estados_grupos'][indice]} · {nombre}"
+            callback = f"orma_permno:{captura_id}:{indice}"
+        filas.append([InlineKeyboardButton(etiqueta[:60], callback_data=callback)])
     filas.extend([
+        [InlineKeyboardButton("🔄 ACTUALIZAR MEMBRESÍA", callback_data=f"orma_permrefresh:{captura_id}")],
         [InlineKeyboardButton("CONTINUAR · PERMISOS ➡️", callback_data=f"orma_permnext:{captura_id}")],
         [InlineKeyboardButton("⬅️ FICHA / CANCELAR", callback_data=f"orma_ficha:{captura_id}")],
     ])
@@ -5973,20 +6008,29 @@ async def permisos_individuales_callback(query, usuario, context, data):
     elif not estado or estado["captura_id"] != captura_id:
         await query.answer("Borrador caducado. Abre PERMISOS INDIVIDUALES nuevamente.", show_alert=True); return
     accion = partes[0]
-    if accion in {"orma_perm", "orma_permall", "orma_permnone", "orma_permg"}:
-        if accion == "orma_permall": estado["grupos"] = set(range(1, 13))
+    if accion == "orma_permno":
+        try:
+            indice = int(partes[2]); etiqueta = estado["estados_grupos"][indice]
+        except (ValueError, IndexError, KeyError):
+            etiqueta = "Grupo no disponible"
+        await query.answer(f"No se selecciona este grupo: {etiqueta}", show_alert=True); return
+    if accion in {"orma_perm", "orma_permall", "orma_permnone", "orma_permg", "orma_permrefresh"}:
+        await actualizar_grupos_usuario_permisos(context.bot, captura, estado)
+        if accion == "orma_permall": estado["grupos"] = set(estado["disponibles"])
         if accion == "orma_permnone": estado["grupos"] = set()
         if accion == "orma_permg":
             try:
                 indice = int(partes[2]); assert 1 <= indice <= 12
             except (ValueError, IndexError, AssertionError):
                 await query.answer("Grupo no válido.", show_alert=True); return
+            if indice not in estado["disponibles"]:
+                await query.answer("El usuario no es miembro comprobado o no puede restringirse aquí.", show_alert=True); return
             if indice in estado["grupos"]: estado["grupos"].remove(indice)
             else: estado["grupos"].add(indice)
         estado["confirmacion"] = False
         await query.answer()
         await safe_query_edit_message(query, "🔐 <b>PERMISOS INDIVIDUALES · SELECCIONAR GRUPOS</b>\n\n"
-            + cabecera_identidad_orma(captura) + f"\n\nSeleccionados: <b>{len(estado['grupos'])}/12</b>\nSolo afectará a esta persona en los grupos elegidos.",
+            + cabecera_identidad_orma(captura) + "\n\n" + resumen_membresia_selector_permisos(estado),
             parse_mode="HTML", reply_markup=teclado_grupos_permisos(captura_id, estado)); return
     if not estado["grupos"]:
         await query.answer("Selecciona al menos un grupo.", show_alert=True); return
@@ -6021,6 +6065,10 @@ async def permisos_individuales_callback(query, usuario, context, data):
             await query.answer("Duración no válida.", show_alert=True); return
         estado["duracion"] = segundos
     if accion == "orma_permreview":
+        await actualizar_grupos_usuario_permisos(context.bot, captura, estado)
+        if not estado["grupos"]:
+            estado["confirmacion"] = False
+            await query.answer("No quedan grupos comprobados seleccionados. Actualiza la membresía.", show_alert=True); return
         if not estado["cambios"]:
             await query.answer("No seleccionaste ningún cambio.", show_alert=True); return
         estado["confirmacion"] = True
@@ -6038,9 +6086,18 @@ async def permisos_individuales_callback(query, usuario, context, data):
     if accion == "orma_permgo":
         if not estado["confirmacion"] or not estado["cambios"]:
             await query.answer("Revisa y confirma los cambios antes de aplicarlos.", show_alert=True); return
+        seleccion_anterior = set(estado["grupos"])
+        await actualizar_grupos_usuario_permisos(context.bot, captura, estado)
+        omitidos = seleccion_anterior - estado["grupos"]
         BORRADORES_PERMISOS.pop(usuario.id, None)
-        await query.answer("Aplicando y verificando permisos…")
+        await query.answer("Aplicando solo en grupos comprobados…")
         resultados = await aplicar_permisos_individuales(context.bot, usuario.id, captura, estado)
+        for indice in sorted(omitidos):
+            grupo = grupo_orma_por_indice(indice)
+            motivo = "OMITIDO · " + estado["estados_grupos"][indice]
+            registrar_auditoria_orma(usuario.id, captura, "PERMISOS_GRUPO_OMITIDO", grupo=grupo,
+                detalle=motivo, resultado="OMITIDO")
+            resultados.append((False, grupo["nombre"], motivo))
         await safe_query_edit_message(query, "🔐 <b>RESULTADO POR GRUPO</b>\n\n" + texto_resultados_moderacion(resultados), parse_mode="HTML",
             reply_markup=completar_navegacion_panel(InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔐 NUEVO AJUSTE", callback_data=f"orma_perm:{captura_id}")],
@@ -6070,7 +6127,7 @@ async def orma_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data or ""
 
-    if data.startswith(("orma_perm:", "orma_permall:", "orma_permnone:", "orma_permg:", "orma_permnext:", "orma_permt:", "orma_permmedia:", "orma_permtime:", "orma_permdur:", "orma_permreview:", "orma_permgo:")):
+    if data.startswith(("orma_perm:", "orma_permall:", "orma_permnone:", "orma_permg:", "orma_permnext:", "orma_permt:", "orma_permmedia:", "orma_permtime:", "orma_permdur:", "orma_permreview:", "orma_permgo:", "orma_permrefresh:", "orma_permno:")):
         ENTRADAS_CONTROL_PUBLICIDAD.pop(usuario.id, None)
         ENTRADAS_ORMA_TOTAL.pop(usuario.id, None)
         ENTRADAS_RAIZ.pop(usuario.id, None)

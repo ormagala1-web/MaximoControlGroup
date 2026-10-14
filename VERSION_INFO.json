@@ -2,13 +2,13 @@
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
   "version": "1.0.16",
-  "status": "CANDIDATE",
+  "status": "APPROVED",
   "base_version": "1.0.15",
   "base_commit": "238d8768c58a2e5e3eccbdbd063e85d8f1ac8942",
   "timezone": "America/Lima",
   "title": "PANEL FUNCIONAL",
   "updated_at": "13/10/2026",
-  "live_validation": "PENDING_JUSTRUNMY",
+  "live_validation": "USER_APPROVED_REAL_TESTS_PENDING",
   "database_migration": [
     "control_publicidad_grupos.controlar_texto_simple: aditiva e idempotente; conserva excepción anterior"
   ],
@@ -34,5 +34,7 @@
     "registrar_panel_reemplazo",
     "mostrar_error_entrada_panel"
   ],
-  "validation": "167 callbacks simulados; migración doble; integridad y conservación de datos; motores y moderación simulados"
+  "validation": "167 callbacks simulados; migración doble; integridad y conservación de datos; motores y moderación simulados",
+  "approval_date": "13/10/2026",
+  "approval_note": "Aprobada expresamente por el usuario; pruebas reales pendientes"
 }

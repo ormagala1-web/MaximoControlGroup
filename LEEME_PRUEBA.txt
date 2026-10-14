@@ -1,7 +1,7 @@
 # MÁXIMO CONTROL GROUP · candidata v1.0.16
 
 Preparada el 13/10/2026 a partir de v1.0.15, commit 238d8768c58a2e5e3eccbdbd063e85d8f1ac8942.
-Estado: CANDIDATA. No desplegada ni aprobada mediante pruebas reales.
+Estado: APROBADA por autorización expresa del usuario el 13/10/2026. Desplegada en JustRunMy; pruebas reales en Telegram pendientes.
 
 ## Correcciones realizadas
 

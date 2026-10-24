@@ -266,7 +266,7 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.18-candidate.5"
+APP_VERSION = "1.0.18-candidate.6"
 APP_VERSION_TITULO = "FICHAS Y PERMISOS"
 APP_VERSION_FECHA = "24/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
@@ -8492,6 +8492,27 @@ async def registrar_cambio_membresia_grupo(
 # BOT MODERADOR: @MaximoControlGroup_bot
 # =========================================================
 
+async def abrir_control_desde_registro(update,context):
+    usuario=update.effective_user
+    if not usuario or not es_administrador_maximo(usuario) or update.effective_chat.type!=ChatType.PRIVATE:return
+    match=re.fullmatch(r"registro_([0-9]{1,20})_([0-9]{1,2})",context.args[0] if context.args else '')
+    if not match or BIENVENIDAS is None:
+        await update.effective_message.reply_text('Enlace de control no válido.');return
+    uid,order=map(int,match.groups())
+    if not (0<uid<2**63 and 1<=order<=12):
+        await update.effective_message.reply_text('Enlace de control no válido.');return
+    target,group=BIENVENIDAS.control_payload(uid,order)
+    if not target or not group:
+        await update.effective_message.reply_text('El usuario no pertenece al registro en vivo.');return
+    for state in (ENTRADAS_CONTROL_PUBLICIDAD,ENTRADAS_ORMA_TOTAL,ENTRADAS_RAIZ,SELECCIONES_MODERACION_ORMA,BORRADORES_PERMISOS):
+        state.pop(usuario.id,None)
+    from types import SimpleNamespace
+    source=SimpleNamespace(id=group['chat_id'],username=group['username'],title=group['name'])
+    # Membership movement has no human source message: never substitute the archive's message ID.
+    captura_id=guardar_captura_orma(usuario.id,'USUARIO',uid,target['username'],target['name'],False,source,0)
+    await mostrar_ficha_orma_privada(context.bot,usuario.id,captura_id)
+
+
 async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.effective_message
     usuario = update.effective_user
@@ -8515,6 +8536,10 @@ async def maximo_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not es_administrador_maximo(usuario):
+        return
+
+    if context.args and context.args[0].startswith('registro_'):
+        await abrir_control_desde_registro(update,context)
         return
 
     registrar_usuario_membresia(usuario)

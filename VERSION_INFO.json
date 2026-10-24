@@ -1,7 +1,7 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.18-candidate.5",
+  "version": "1.0.18-candidate.6",
   "status": "CANDIDATE",
   "base_version": "1.0.17",
   "base_commit": "660046d99aa312bcae6a54307009a3afc3362f15",
@@ -15,7 +15,7 @@
     "Limpieza de bienvenidas desactivada por instruccion del usuario.",
     "Conservar moderacion, reglas 12/12, publicidad y datos existentes."
   ],
-  "revision": 5,
-  "revision_scope": "Registro exclusivo en su grupo: botones, movimientos e identidad sin mensajes privados; incluir correcciones de candidata 4",
-  "candidate_base_commit": "6abdbb7"
+  "revision": 6,
+  "revision_scope": "Una ficha por usuario con cabecera permanente; mover al final por movimiento; control individual, eliminar y Chat ID",
+  "candidate_base_commit": "9de0667"
 }

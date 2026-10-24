@@ -44,6 +44,7 @@ class WelcomeService:
         self.by_chat = {g['chat_id']: g for g in self.groups}
         self.locks = {}
         self.task = None
+        self.delivery_lock = asyncio.Lock()
         self.boot = time.time()
         self.archive_error = ''
         self.notify_admin = notify_admin
@@ -78,6 +79,11 @@ class WelcomeService:
                 CREATE TABLE IF NOT EXISTS bienvenida_usuarios_vivos(user_id INTEGER PRIMARY KEY,first_entry_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS bienvenida_fichas_anteriores(message_id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'PENDING',error TEXT,next_try REAL NOT NULL DEFAULT 0);
             ''')
+            columns={r['name'] for r in c.execute('PRAGMA table_info(bienvenida_fichas)')}
+            for column,definition in (('move_event_id','INTEGER NOT NULL DEFAULT 0'),('published_event_id','INTEGER NOT NULL DEFAULT 0'),('hidden','INTEGER NOT NULL DEFAULT 0')):
+                if column not in columns:c.execute(f'ALTER TABLE bienvenida_fichas ADD COLUMN {column} {definition}')
+            retired_columns={r['name'] for r in c.execute('PRAGMA table_info(bienvenida_fichas_anteriores)')}
+            if 'replacement_id' not in retired_columns:c.execute('ALTER TABLE bienvenida_fichas_anteriores ADD COLUMN replacement_id INTEGER')
             if not c.execute("SELECT 1 FROM bienvenida_meta WHERE key='live_registration_started_at'").fetchone():
                 original=c.execute("SELECT value FROM bienvenida_meta WHERE key='import_r028'").fetchone()
                 cutoff=original['value'] if original else stamp(datetime.now(timezone.utc).replace(microsecond=0))
@@ -95,6 +101,9 @@ class WelcomeService:
             if not c.execute("SELECT 1 FROM bienvenida_meta WHERE key='group_only_revision_5'").fetchone():
                 c.execute("UPDATE bienvenida_fichas SET dirty=1,next_try=0,revision=revision+1 WHERE user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos)")
                 c.execute("INSERT INTO bienvenida_meta VALUES('group_only_revision_5',?)",(stamp(),))
+            if not c.execute("SELECT 1 FROM bienvenida_meta WHERE key='card_design_revision_6'").fetchone():
+                c.execute("UPDATE bienvenida_fichas SET dirty=1,next_try=0,revision=revision+1 WHERE hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos)")
+                c.execute("INSERT INTO bienvenida_meta VALUES('card_design_revision_6',?)",(stamp(),))
             if c.execute("SELECT 1 FROM bienvenida_meta WHERE key='import_r028'").fetchone():
                 return
             for u in c.execute('SELECT user_id,username,nombre,fecha_primer_contacto,fecha_actualizacion FROM usuarios_membresia').fetchall():
@@ -109,10 +118,13 @@ class WelcomeService:
                 c.execute('INSERT OR REPLACE INTO bienvenida_estados VALUES(?,?,?,?,?,?,?)',(e['user_id'],e['chat_id'],None,None,when,None,'HISTORICO'))
             c.execute("INSERT INTO bienvenida_meta VALUES('import_r028',?)",(stamp(),))
 
-    def dirty(self, c, uid):
-        if not c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone():
-            return
-        c.execute('INSERT INTO bienvenida_fichas(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET dirty=1,revision=revision+1,next_try=0',(uid,))
+    def dirty(self,c,uid,movement_id=0):
+        if not c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone():return
+        if movement_id:
+            c.execute('INSERT INTO bienvenida_fichas(user_id,move_event_id) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET dirty=1,revision=revision+1,next_try=0,move_event_id=excluded.move_event_id,hidden=0',(uid,movement_id))
+            c.execute("INSERT OR REPLACE INTO bienvenida_vistas VALUES(?,'p',0)",(uid,))
+        else:
+            c.execute('INSERT INTO bienvenida_fichas(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET dirty=CASE WHEN hidden=0 THEN 1 ELSE 0 END,revision=revision+1,next_try=0',(uid,))
 
     def record_change(self, update, source="TELEGRAM"):
         event = getattr(update, 'chat_member', None)
@@ -137,7 +149,8 @@ class WelcomeService:
             if c.execute('SELECT 1 FROM bienvenida_eventos WHERE event_key IN (?,?)',(key,'tg:'+str(update.update_id))).fetchone():
                 return False
             same=c.execute('SELECT * FROM bienvenida_eventos WHERE user_id=? AND chat_id=? AND kind=? AND occurred_at=? AND source<>? ORDER BY id DESC LIMIT 1',(user.id,event.chat.id,kind,when,source)).fetchone()
-            if same and same['source'] in ('SERVICIO','TELEGRAM'):
+            merged=bool(same and same['source'] in ('SERVICIO','TELEGRAM'))
+            if merged:
                 if source=='SERVICIO':
                     return False
                 c.execute('UPDATE bienvenida_eventos SET event_key=?,source=?,actor_id=? WHERE id=?',(key,source,getattr(event.from_user,'id',None),same['id']))
@@ -147,7 +160,9 @@ class WelcomeService:
             old=c.execute('SELECT changed_at FROM bienvenida_estados WHERE user_id=? AND chat_id=?',(user.id,event.chat.id)).fetchone()
             if not old or not old['changed_at'] or when >= old['changed_at']:
                 c.execute('INSERT OR REPLACE INTO bienvenida_estados VALUES(?,?,?,?,?,?,?)',(user.id,event.chat.id,int(is_member(event.new_chat_member)),str(event.new_chat_member.status),when,when,'TELEGRAM'))
-            self.dirty(c,user.id)
+            recorded=c.execute('SELECT id FROM bienvenida_eventos WHERE event_key=?',(key,)).fetchone()['id']
+            latest=c.execute('SELECT id FROM bienvenida_eventos WHERE user_id=? ORDER BY occurred_at DESC,id DESC LIMIT 1',(user.id,)).fetchone()['id']
+            self.dirty(c,user.id,movement_id=recorded if recorded==latest and not merged else 0)
             c.execute('INSERT OR IGNORE INTO bienvenida_verificaciones(user_id) VALUES(?)',(user.id,))
         return True
 
@@ -246,61 +261,73 @@ class WelcomeService:
             latest=c.execute('SELECT * FROM bienvenida_eventos WHERE user_id=? ORDER BY occurred_at DESC,id DESC LIMIT 1',(uid,)).fetchone()
         return dict(user) if user else None,states,dict(latest) if latest else None
 
+    def selected_group(self,uid):
+        with self.db() as c:
+            view=c.execute('SELECT kind,value FROM bienvenida_vistas WHERE user_id=?',(uid,)).fetchone()
+        _,_,last=self.data(uid)
+        if view and view['kind']=='g':
+            return next(g for g in self.groups if g['order']==view['value'])
+        return self.by_chat[last['chat_id']] if last else self.groups[0]
+
     def card_text(self,uid):
         user,states,last=self.data(uid)
-        if not user:
-            return 'Expediente no disponible.'
-        with self.db() as c:
-            dates={r['chat_id']:dict(r) for r in c.execute("SELECT chat_id,MIN(CASE WHEN kind='ENTRADA' THEN occurred_at END) first_entry,MAX(CASE WHEN kind='ENTRADA' THEN occurred_at END) last_entry,MAX(CASE WHEN kind IN ('SALIDA','EXPULSION') THEN occurred_at END) last_exit FROM bienvenida_eventos WHERE user_id=? AND source<>'HISTORICO' AND occurred_at>=(SELECT value FROM bienvenida_meta WHERE key='live_registration_started_at') GROUP BY chat_id",(uid,))}
+        if not user:return 'Ficha no disponible.'
+        g=self.selected_group(uid)
         inside=sum(s['present']==1 for s in states.values())
         outside=sum(s['present']==0 for s in states.values())
         username=('@'+html.escape(user['username'])) if user['username'] else 'Sin @usuario público'
-        text=(f'🛂 <b>REGISTRO DE USUARIO</b>\n━━━━━━━━━━━━━━━━━━━━\n'
+        text=(f'🛂 <b>FICHA INDIVIDUAL · REGISTRO EN VIVO</b>\n━━━━━━━━━━━━━━━━━━━━\n'
               f'<b>{html.escape(user["name"][:200])}</b>\n'
               f'🆔 <b>ID:</b> <code>{uid}</code>\n👤 <b>USER:</b> {username}\n\n'
-              f'🟢 {inside} dentro · 🔴 {outside} fuera · ⚪ {12-inside-outside} sin verificar\n\n')
+              f'🟢 {inside} dentro · 🔴 {outside} fuera · ⚪ {12-inside-outside} sin verificar\n')
         if last:
-            text+=f'<b>Último movimiento:</b> {last["kind"]} · {html.escape(self.by_chat[last["chat_id"]]["short"])}\n{visible_date(last["occurred_at"])}\n\n'
-        text+='<b>FECHAS POR GRUPO</b>\n'
-        for g in self.groups:
-            state=states.get(g['chat_id'],{}).get('present')
-            mark='🟢' if state==1 else ('🔴' if state==0 else '⚪')
-            entry=dates.get(g['chat_id'],{})
-            date_in=visible_date(entry.get('last_entry')) if entry.get('last_entry') else 'Sin registro'
-            date_out=visible_date(entry.get('last_exit')) if entry.get('last_exit') else 'Sin registro'
-            label_out='Salida anterior' if state==1 and entry.get('last_exit') else 'Salida'
-            text+=f'\n<b>{mark} {html.escape(g["name"])}</b>\nIngreso: {date_in}\n{label_out}: {date_out}\n'
-        text+='\nHora de Perú · Últimos ingresos y salidas registrados.\nMOVIMIENTOS conserva el historial completo de reingresos.'
+            current=self.by_chat[last['chat_id']]
+            text+=f'\n<b>ÚLTIMA ACTIVIDAD</b>\n{last["kind"]} · {html.escape(current["name"])}\nChat ID: <code>{current["chat_id"]}</code>\n🕒 {visible_date(last["occurred_at"])}\n'
+        text+='\n'+self.group_detail(uid,g['order'])
+        text+='\nHora de Perú · Selecciona un grupo para consultar sus fechas.\nUna ficha por usuario · Historial completo en MOVIMIENTOS.'
         return text
 
     def keyboard(self,uid):
         from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup
-        _,states,_=self.data(uid)
+        user,states,_=self.data(uid)
         buttons=[]
         for g in self.groups:
             state=states.get(g['chat_id'],{}).get('present')
             mark='🟢' if state==1 else ('🔴' if state==0 else '⚪')
             buttons.append(B(f'{mark} {g["short"]}',callback_data=f'wel:g:{uid}:{g["order"]}'))
         rows=[buttons[i:i+3] for i in range(0,12,3)]
-        rows += [[B('📖 MOVIMIENTOS',callback_data=f'wel:h:{uid}:0'),B('🔄 VERIFICAR 12/12',callback_data=f'wel:v:{uid}')], [B('👤 IDENTIDAD',callback_data=f'wel:i:{uid}'),B('🛂 FICHA PRINCIPAL',callback_data=f'wel:p:{uid}')]]
+        rows += [[B('📖 MOVIMIENTOS',callback_data=f'wel:h:{uid}:0'),B('🔄 VERIFICAR 12/12',callback_data=f'wel:v:{uid}')]]
+        profile=B('👤 ABRIR PERFIL',url='https://t.me/'+user['username']) if user and user['username'] and all(ch.isascii() and (ch.isalnum() or ch=='_') for ch in user['username']) else B('👤 IDENTIDAD',callback_data=f'wel:i:{uid}')
+        rows.append([profile,B('🛂 FICHA PRINCIPAL',callback_data=f'wel:p:{uid}')])
+        group=self.selected_group(uid)
+        rows.append([B('🛡 CONTROL INDIVIDUAL /ORMA',url=f'https://t.me/MaximoControlGroup_bot?start=registro_{uid}_{group["order"]}')])
+        rows.append([B('🗑 ELIMINAR ESTE MENSAJE',callback_data=f'wel:d:{uid}')])
         return InlineKeyboardMarkup(rows)
 
-    def group_text(self,uid,order):
+    def group_detail(self,uid,order):
         g=next(g for g in self.groups if g['order']==order)
-        user,states,_=self.data(uid)
+        _,states,_=self.data(uid)
         with self.db() as c:
             events=c.execute("SELECT * FROM bienvenida_eventos WHERE user_id=? AND chat_id=? AND source<>'HISTORICO' AND occurred_at>=(SELECT value FROM bienvenida_meta WHERE key='live_registration_started_at') ORDER BY occurred_at,id",(uid,g['chat_id'])).fetchall()
-        entries=[e for e in events if e['kind']=='ENTRADA']; exits=[e for e in events if e['kind']!='ENTRADA']
-        s=states.get(g['chat_id'],{}); present=s.get('present')
+        entries=[e for e in events if e['kind']=='ENTRADA'];exits=[e for e in events if e['kind']!='ENTRADA']
+        state=states.get(g['chat_id'],{});present=state.get('present')
         label='🟢 DENTRO' if present==1 else ('🔴 FUERA' if present==0 else '⚪ SIN VERIFICAR')
-        return (f'🛂 <b>{html.escape(user["name"][:200])}</b> · <code>{uid}</code>\n\n'
-                f'<b>{html.escape(g["name"])}</b>\n{label}\n\n'
-                f'Primer ingreso conocido: {visible_date(entries[0]["occurred_at"] if entries else None)}\n'
+        return (f'<b>GRUPO SELECCIONADO</b>\n<b>{html.escape(g["name"])}</b>\nChat ID: <code>{g["chat_id"]}</code> · {label}\n\n'
+                f'Primer ingreso: {visible_date(entries[0]["occurred_at"] if entries else None)}\n'
                 f'Último ingreso: {visible_date(entries[-1]["occurred_at"] if entries else None)}\n'
                 f'Última salida: {visible_date(exits[-1]["occurred_at"] if exits else None)}\n'
-                f'Ingresos registrados: {len(entries)} · Reingresos observados: {max(0,len(entries)-1)}\n'
-                f'Estado observado/comprobado: {visible_date(s.get("checked_at"))}\n\n'
-                'Las fechas no registradas no se reconstruyen. Hora de Perú.')
+                f'Ingresos: {len(entries)} · Reingresos: {max(0,len(entries)-1)}\n'
+                f'Última comprobación: {visible_date(state.get("checked_at"))}\n')
+
+    def group_text(self,uid,order):
+        return self.card_text(uid)
+
+    def control_payload(self,uid,order):
+        with self.db() as c:
+            live=c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone()
+        group=next((g for g in self.groups if g['order']==order),None)
+        user,_,_=self.data(uid)
+        return (user,group) if live and user and group else (None,None)
 
     def history_text(self,uid,page):
         with self.db() as c:
@@ -355,12 +382,12 @@ class WelcomeService:
             self.destination_checked=time.time()
             with self.db() as c:
                 ready=c.execute("SELECT value FROM bienvenida_meta WHERE key='registration_ready_revision'").fetchone()
-            if not ready or ready['value']!='candidate.5':
-                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · CANDIDATA 5\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. La limpieza de bienvenidas continúa desactivada.',disable_notification=True)
+            if not ready or ready['value']!='candidate.6':
+                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · CANDIDATA 6\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. La limpieza de bienvenidas continúa desactivada.',disable_notification=True)
                 if self.destination_thread is not None: params['message_thread_id']=self.destination_thread
                 await bot.send_message(**params)
                 with self.db() as c:
-                    c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('registration_ready_revision','candidate.5')")
+                    c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('registration_ready_revision','candidate.6')")
         except Exception as exc:
             self.destination_checked=0
             self.archive_error='No puedo publicar en el grupo de registro: '+str(exc)
@@ -376,38 +403,34 @@ class WelcomeService:
         LOG.warning('Registro de usuarios: %s',detail)
 
     def view_payload(self,uid):
-        from telegram import InlineKeyboardButton as B, InlineKeyboardMarkup
+        from telegram import InlineKeyboardButton as B,InlineKeyboardMarkup
         with self.db() as c:
             stored=c.execute('SELECT kind,value FROM bienvenida_vistas WHERE user_id=?',(uid,)).fetchone()
-        kind=stored['kind'] if stored else 'p'
-        value=stored['value'] if stored else 0
-        text=self.card_text(uid)
-        keyboard=self.keyboard(uid)
-        if kind=='g':
-            text=self.group_text(uid,value)
-        elif kind=='i':
-            user,_,_=self.data(uid)
-            username=('@'+html.escape(user['username'])) if user['username'] else 'Sin @usuario público'
-            text=f'👤 <b>IDENTIDAD REGISTRADA</b>\n\n<b>{html.escape(user["name"][:200])}</b>\nID: <code>{uid}</code>\nUSER: {username}\n\nEl registro no necesita abrir el perfil ni cambiar la privacidad del usuario.'
-            if user['username'] and all(ch.isascii() and (ch.isalnum() or ch=='_') for ch in user['username']):
-                text+='\nPerfil público: https://t.me/'+html.escape(user['username'])
-        elif kind=='h':
+        text=self.card_text(uid);keyboard=self.keyboard(uid)
+        if stored and stored['kind']=='h':
             with self.db() as c:
                 count=c.execute("SELECT COUNT(*) FROM bienvenida_eventos WHERE user_id=? AND source<>'HISTORICO' AND occurred_at>=(SELECT value FROM bienvenida_meta WHERE key='live_registration_started_at')",(uid,)).fetchone()[0]
-            page=min(max(0,value),max(0,(count-1)//8))
-            text=self.history_text(uid,page)
+            page=min(max(0,stored['value']),max(0,(count-1)//8))
+            text+='\n━━━━━━━━━━━━━━━━━━━━\n'+self.history_text(uid,page)
             nav=[]
-            if page:nav.append(B('⬅️',callback_data=f'wel:h:{uid}:{page-1}'))
-            if (page+1)*8<count:nav.append(B('➡️',callback_data=f'wel:h:{uid}:{page+1}'))
-            keyboard=InlineKeyboardMarkup(([nav] if nav else [])+[[B('🛂 FICHA PRINCIPAL',callback_data=f'wel:p:{uid}')]])
+            if page:nav.append(B('⬅️ HISTORIAL',callback_data=f'wel:h:{uid}:{page-1}'))
+            if (page+1)*8<count:nav.append(B('HISTORIAL ➡️',callback_data=f'wel:h:{uid}:{page+1}'))
+            if nav:keyboard=InlineKeyboardMarkup([nav]+list(keyboard.inline_keyboard))
         return text,keyboard
 
     async def publish_one(self,bot):
+        async with self.delivery_lock:
+            return await self._publish_one_unlocked(bot)
+
+    async def _publish_one_unlocked(self,bot):
         with self.db() as c:
-            row=c.execute('SELECT * FROM bienvenida_fichas WHERE dirty=1 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos) AND next_try<=? ORDER BY next_try,user_id LIMIT 1',(time.time(),)).fetchone()
+            row=c.execute('SELECT * FROM bienvenida_fichas WHERE dirty=1 AND hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos) AND next_try<=? ORDER BY CASE WHEN move_event_id>published_event_id THEN 0 ELSE 1 END,move_event_id,next_try,user_id LIMIT 1',(time.time(),)).fetchone()
         if not row:
             return False
         uid=row['user_id']; message_id=row['message_id']
+        old_message_id=message_id
+        move=bool(message_id and row['move_event_id']>row['published_event_id'])
+        if move:message_id=None
         try:
             await self.check_destination(bot)
             text,keyboard=self.view_payload(uid)
@@ -434,8 +457,11 @@ class WelcomeService:
                     raise
                 message_id=result.message_id
             with self.db() as c:
-                c.execute('UPDATE bienvenida_fichas SET message_id=?,dirty=CASE WHEN revision=? THEN 0 ELSE 1 END,error=NULL,next_try=0 WHERE user_id=?',(message_id,row['revision'],uid))
+                c.execute('UPDATE bienvenida_fichas SET message_id=?,published_event_id=?,dirty=CASE WHEN revision=? THEN 0 ELSE 1 END,error=NULL,next_try=0 WHERE user_id=?',(message_id,row['move_event_id'],row['revision'],uid))
+                if old_message_id and old_message_id!=message_id:
+                    c.execute('INSERT OR IGNORE INTO bienvenida_fichas_anteriores(message_id,user_id,replacement_id) VALUES(?,?,?)',(old_message_id,uid,message_id))
             self.archive_error=''
+            if old_message_id and old_message_id!=message_id:await self.retire_previous_card(bot,old_message_id)
         except Exception as exc:
             self.archive_error=(str(exc) if self.destination_checked else (self.archive_error or str(exc)))
             await self.notify_problem(bot,self.archive_error)
@@ -445,9 +471,12 @@ class WelcomeService:
             LOG.warning('Ficha pendiente uid=%s: %s',uid,exc)
         return True
 
-    async def retire_previous_card(self,bot):
+    async def retire_previous_card(self,bot,message_id=None):
         with self.db() as c:
-            row=c.execute("SELECT * FROM bienvenida_fichas_anteriores WHERE state='PENDING' AND next_try<=? ORDER BY message_id LIMIT 1",(time.time(),)).fetchone()
+            sql="SELECT * FROM bienvenida_fichas_anteriores WHERE state='PENDING' AND next_try<=? AND message_id NOT IN (SELECT message_id FROM bienvenida_fichas WHERE message_id IS NOT NULL)"
+            args=[time.time()]
+            if message_id:sql+=' AND message_id=?';args.append(message_id)
+            row=c.execute(sql+' ORDER BY message_id LIMIT 1',args).fetchone()
         if not row:
             return False
         try:
@@ -456,7 +485,14 @@ class WelcomeService:
         except Exception as exc:
             detail=str(exc)
             gone='message to delete not found' in detail.lower()
-            blocked="can't be deleted" in detail.lower()
+            blocked="can't be deleted" in detail.lower() or '48' in detail
+            if blocked and row['replacement_id']:
+                try:
+                    link=f'https://t.me/c/{str(DESTINATION)[4:]}/{row["replacement_id"]}'
+                    await bot.edit_message_text(chat_id=DESTINATION,message_id=row['message_id'],text='↪️ Ficha sustituida por un movimiento posterior.\nFicha vigente: '+link,reply_markup=None)
+                    with self.db() as c:c.execute("UPDATE bienvenida_fichas_anteriores SET state='REPLACED',error=NULL WHERE message_id=?",(row['message_id'],))
+                    return True
+                except Exception as edit_error:detail+='; '+str(edit_error)
             with self.db() as c:c.execute('UPDATE bienvenida_fichas_anteriores SET state=?,error=?,next_try=? WHERE message_id=?',('REMOVED' if gone else ('BLOCKED' if blocked else 'PENDING'),detail,time.time()+max(60,self.retry_delay(exc)),row['message_id']))
         return True
 
@@ -543,6 +579,19 @@ class WelcomeService:
                 card=c.execute('SELECT message_id FROM bienvenida_fichas WHERE user_id=?',(uid,)).fetchone()
             if not live or not card or card['message_id']!=q.message.message_id:
                 await q.answer('Esta ficha ya no es la ficha activa del usuario.',show_alert=True)
+                return
+            if parts[1]=='d':
+                await q.answer()
+                async with self.delivery_lock:
+                    with self.db() as c:
+                        current=c.execute('SELECT message_id,move_event_id FROM bienvenida_fichas WHERE user_id=?',(uid,)).fetchone()
+                    if not current or current['message_id']!=q.message.message_id:return
+                    await context.bot.delete_message(chat_id=DESTINATION,message_id=q.message.message_id)
+                    with self.db() as c:c.execute('UPDATE bienvenida_fichas SET message_id=NULL,dirty=CASE WHEN move_event_id=? THEN 0 ELSE 1 END,hidden=CASE WHEN move_event_id=? THEN 1 ELSE 0 END,revision=revision+1 WHERE user_id=? AND message_id=?',(current['move_event_id'],current['move_event_id'],uid,q.message.message_id))
+                return
+            if parts[1]=='i':
+                user,_,_=self.data(uid)
+                await q.answer('ID: '+str(uid)+' · USER: '+('@'+user['username'] if user['username'] else 'Sin @usuario público'),show_alert=True)
                 return
             if parts[1]=='v':
                 with self.db() as c:

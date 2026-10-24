@@ -266,7 +266,7 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.18-candidate.1"
+APP_VERSION = "1.0.18-candidate.2"
 APP_VERSION_TITULO = "BIENVENIDAS Y PASAPORTES · CANDIDATA"
 APP_VERSION_FECHA = "24/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
@@ -9422,7 +9422,7 @@ async def main():
     global MAXIMO_APP_REF, UNION_APP_REF, BIENVENIDAS
 
     inicializar_base_datos()
-    BIENVENIDAS = WelcomeService(DATABASE_PATH, es_administrador_maximo)
+    BIENVENIDAS = WelcomeService(DATABASE_PATH, es_administrador_maximo, notify_admin=ORMA_ADMIN_USER_ID)
     BIENVENIDAS.initialize()
     iniciar_agente_respaldo()
 

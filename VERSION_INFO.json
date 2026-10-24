@@ -1,7 +1,7 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.18-candidate.1",
+  "version": "1.0.18-candidate.2",
   "status": "CANDIDATE",
   "base_version": "1.0.17",
   "base_commit": "660046d99aa312bcae6a54307009a3afc3362f15",
@@ -14,5 +14,8 @@
     "Expediente por usuario y movimientos en grupo -1004303379365 tema 3.",
     "Conservar moderacion, publicidad, /orma, membresia 12/12 y bots exentos.",
     "No expira saludos automaticamente ni intenta borrar mensajes desconocidos."
-  ]
+  ],
+  "revision": 2,
+  "revision_scope": "Comprobacion de acceso al archivo privado y ruta sin tema para grupos normales",
+  "candidate_base_commit": "5df0dea"
 }

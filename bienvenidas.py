@@ -36,7 +36,7 @@ def is_member(member):
 
 
 class WelcomeService:
-    def __init__(self, database, authorized):
+    def __init__(self, database, authorized, notify_admin=None):
         self.database = str(database)
         self.authorized = authorized
         self.groups = json.loads(Path(__file__).with_name('bienvenidas_grupos.json').read_text(encoding='utf-8'))
@@ -45,6 +45,10 @@ class WelcomeService:
         self.task = None
         self.boot = time.time()
         self.archive_error = ''
+        self.notify_admin = notify_admin
+        self.destination_thread = None
+        self.destination_label = "Sin comprobar"
+        self.destination_checked = 0
         self.api_pause_until = 0
 
     @contextmanager
@@ -282,6 +286,41 @@ class WelcomeService:
             else:
                 c.execute('DELETE FROM bienvenida_verificaciones WHERE user_id=?',(uid,))
 
+    async def check_destination(self,bot,force=False):
+        if not force and self.destination_checked and time.time()-self.destination_checked<60:
+            return
+        try:
+            chat=await bot.get_chat(chat_id=DESTINATION)
+            member=await bot.get_chat_member(chat_id=DESTINATION,user_id=bot.id)
+            if str(member.status) not in ('administrator','creator'):
+                raise RuntimeError('Agrega @MaximoControlGroup_bot como administrador al grupo de registro.')
+            self.destination_thread=TOPIC if bool(getattr(chat,'is_forum',False)) else None
+            self.destination_label=('Tema '+str(TOPIC)) if self.destination_thread else 'Grupo normal (sin tema)'
+            with self.db() as c:
+                c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('destination_status',?)",('Acceso confirmado · '+self.destination_label,))
+            self.destination_checked=time.time()
+        except Exception as exc:
+            self.destination_checked=0
+            self.archive_error='No puedo publicar en el grupo de registro: '+str(exc)
+            with self.db() as c:
+                c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('destination_status',?)",(self.archive_error,))
+            await self.notify_problem(bot,self.archive_error)
+            raise
+
+    async def notify_problem(self,bot,detail):
+        if not self.notify_admin:
+            return
+        with self.db() as c:
+            previous=c.execute("SELECT value FROM bienvenida_meta WHERE key='notified_destination_error'").fetchone()
+        if previous and previous['value']==detail:
+            return
+        try:
+            await bot.send_message(chat_id=self.notify_admin,text='⚠️ BIENVENIDAS · REGISTRO PENDIENTE\n\n'+detail+'\n\nAñade @MaximoControlGroup_bot como administrador al grupo INGRESO DE USUARIOS A GRUPOS. Los eventos recibidos permanecen en cola. Revisa BIENVENIDAS Y PASAPORTES en el centro de raíz.')
+            with self.db() as c:
+                c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('notified_destination_error',?)",(detail,))
+        except Exception as exc:
+            LOG.warning('No se pudo avisar al administrador del destino: %s',exc)
+
     async def publish_one(self,bot):
         with self.db() as c:
             row=c.execute('SELECT * FROM bienvenida_fichas WHERE dirty=1 AND next_try<=? ORDER BY next_try,user_id LIMIT 1',(time.time(),)).fetchone()
@@ -289,6 +328,7 @@ class WelcomeService:
             return False
         uid=row['user_id']; message_id=row['message_id']
         try:
+            await self.check_destination(bot)
             kwargs=dict(chat_id=DESTINATION,text=self.card_text(uid),parse_mode='HTML',reply_markup=self.keyboard(uid))
             if message_id:
                 try:
@@ -302,13 +342,21 @@ class WelcomeService:
                     else:
                         raise
             if not message_id:
-                result=await bot.send_message(message_thread_id=TOPIC,disable_notification=True,**kwargs)
+                if self.destination_thread is not None:
+                    kwargs['message_thread_id']=self.destination_thread
+                try:
+                    result=await bot.send_message(disable_notification=True,**kwargs)
+                except Exception as exc:
+                    if 'thread' in str(exc).lower():
+                        raise RuntimeError('El grupo tiene temas, pero el tema 3 no es un destino valido o esta cerrado. '+str(exc)) from exc
+                    raise
                 message_id=result.message_id
             with self.db() as c:
                 c.execute('UPDATE bienvenida_fichas SET message_id=?,dirty=CASE WHEN revision=? THEN 0 ELSE 1 END,error=NULL,next_try=0 WHERE user_id=?',(message_id,row['revision'],uid))
             self.archive_error=''
         except Exception as exc:
-            self.archive_error=str(exc)
+            self.archive_error=(str(exc) if self.destination_checked else (self.archive_error or str(exc)))
+            await self.notify_problem(bot,self.archive_error)
             if getattr(exc,'retry_after',None) is not None: self.api_pause_until=time.time()+self.retry_delay(exc)
             with self.db() as c:
                 c.execute('UPDATE bienvenida_fichas SET error=?,next_try=? WHERE user_id=?',(str(exc),time.time()+self.retry_delay(exc),uid))
@@ -317,11 +365,16 @@ class WelcomeService:
 
     async def worker(self,bot):
         last_publish=0
+        last_probe=0
         while True:
             try:
                 if time.time()<self.api_pause_until:
                     await asyncio.sleep(min(5,self.api_pause_until-time.time()))
                     continue
+                if time.time()-last_probe>=60:
+                    last_probe=time.time()
+                    try: await self.check_destination(bot,force=True)
+                    except Exception: LOG.warning('Registro privado sin acceso: %s',self.archive_error)
                 await self.clean_pending(bot)
                 with self.db() as c:
                     row=c.execute('SELECT user_id FROM bienvenida_verificaciones WHERE next_try<=? ORDER BY next_try,user_id LIMIT 1',(time.time(),)).fetchone()
@@ -345,7 +398,8 @@ class WelcomeService:
               f'12 grupos configurados · {linked}/12 bots observados y vinculados\n'
               f'Bienvenidas pendientes de limpieza: {pending}\n'
               f'Fichas publicadas: {cards} · Pendientes: {queued}\n\n'
-              'Destino: <code>-1004303379365</code> · Tema <code>3</code>\n'
+              'Destino: <code>-1004303379365</code>\n'
+              f'Ruta: {html.escape(self.destination_label)}\n'
               'Una bienvenida por grupo. Una ficha por usuario.\n'
               'Consultar usuario conocido: /pasaporte seguido de su ID, en privado.\n\n'
               'Máximo debe ser administrador, poder borrar mensajes y tener recepción Bot-to-Bot habilitada.\n'
@@ -382,6 +436,8 @@ class WelcomeService:
             parts=q.data.split(':')
             if parts[1]=='root':
                 await q.answer()
+                try: await self.check_destination(context.bot,force=True)
+                except Exception: pass
                 await q.edit_message_text(text=self.root_text(),parse_mode='HTML',reply_markup=InlineKeyboardMarkup([[B('🔄 ACTUALIZAR',callback_data='wel:root')],[B('⚙️ RAÍZ',callback_data='orma_raiz')]]))
                 return
             uid=int(parts[2]); user,_,_=self.data(uid)

@@ -1,21 +1,21 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.18-candidate.2",
+  "version": "1.0.18-candidate.3",
   "status": "CANDIDATE",
   "base_version": "1.0.17",
   "base_commit": "660046d99aa312bcae6a54307009a3afc3362f15",
   "timezone": "America/Lima",
   "updated_at": "24/10/2026",
-  "title": "BIENVENIDAS Y PASAPORTES",
+  "title": "REGISTRO DE USUARIOS",
   "live_validation": "PENDING_JUSTRUNMY_USER_TEST",
   "scope": [
-    "Una ultima bienvenida por grupo, asociada al bot oficial y persistida.",
-    "Expediente por usuario y movimientos en grupo -1004303379365 tema 3.",
-    "Conservar moderacion, publicidad, /orma, membresia 12/12 y bots exentos.",
-    "No expira saludos automaticamente ni intenta borrar mensajes desconocidos."
+    "Registro de ingresos, salidas y reingresos de los 12 grupos en -1004303379365.",
+    "Incluir modulo y mapa en Docker y validarlos durante la construccion.",
+    "Limpieza de bienvenidas desactivada por instruccion del usuario.",
+    "Conservar moderacion, reglas 12/12, publicidad y datos existentes."
   ],
-  "revision": 2,
-  "revision_scope": "Comprobacion de acceso al archivo privado y ruta sin tema para grupos normales",
-  "candidate_base_commit": "5df0dea"
+  "revision": 3,
+  "revision_scope": "Corregir imagen Docker y concentrar el modulo exclusivamente en registrar usuarios",
+  "candidate_base_commit": "9eaebe0"
 }

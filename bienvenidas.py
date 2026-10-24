@@ -6,6 +6,7 @@ import json
 import logging
 import sqlite3
 import time
+from types import SimpleNamespace
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,7 +92,7 @@ class WelcomeService:
     def dirty(self, c, uid):
         c.execute('INSERT INTO bienvenida_fichas(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET dirty=1,revision=revision+1,next_try=0',(uid,))
 
-    def record_change(self, update):
+    def record_change(self, update, source="TELEGRAM"):
         event = getattr(update, 'chat_member', None)
         if not event or event.chat.id not in self.by_chat:
             return False
@@ -103,9 +104,16 @@ class WelcomeService:
         name = ' '.join(x for x in (user.first_name, getattr(user,'last_name',None)) if x) or 'Sin nombre'
         now = stamp()
         with self.db() as c:
-            result=c.execute('INSERT OR IGNORE INTO bienvenida_eventos(event_key,user_id,chat_id,kind,occurred_at,received_at,name,username,actor_id,source) VALUES(?,?,?,?,?,?,?,?,?,?)',('tg:'+str(update.update_id),user.id,event.chat.id,kind,when,now,name,user.username,getattr(event.from_user,'id',None),'TELEGRAM'))
-            if not result.rowcount:
+            key=f'{source}:{update.update_id}:{event.chat.id}:{user.id}'
+            if c.execute('SELECT 1 FROM bienvenida_eventos WHERE event_key IN (?,?)',(key,'tg:'+str(update.update_id))).fetchone():
                 return False
+            same=c.execute('SELECT * FROM bienvenida_eventos WHERE user_id=? AND chat_id=? AND kind=? AND occurred_at=? AND source<>? ORDER BY id DESC LIMIT 1',(user.id,event.chat.id,kind,when,source)).fetchone()
+            if same and same['source'] in ('SERVICIO','TELEGRAM'):
+                if source=='SERVICIO':
+                    return False
+                c.execute('UPDATE bienvenida_eventos SET event_key=?,source=?,actor_id=? WHERE id=?',(key,source,getattr(event.from_user,'id',None),same['id']))
+            else:
+                c.execute('INSERT INTO bienvenida_eventos(event_key,user_id,chat_id,kind,occurred_at,received_at,name,username,actor_id,source) VALUES(?,?,?,?,?,?,?,?,?,?)',(key,user.id,event.chat.id,kind,when,now,name,user.username,getattr(event.from_user,'id',None),source))
             c.execute('INSERT INTO bienvenida_usuarios VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,username=excluded.username,premium=excluded.premium,language=excluded.language,last_seen=excluded.last_seen',(user.id,name,user.username,int(bool(getattr(user,'is_premium',False))),getattr(user,'language_code',None),when,now))
             old=c.execute('SELECT changed_at FROM bienvenida_estados WHERE user_id=? AND chat_id=?',(user.id,event.chat.id)).fetchone()
             if not old or not old['changed_at'] or when >= old['changed_at']:
@@ -185,12 +193,22 @@ class WelcomeService:
     async def observe(self, update, context):
         try:
             self.record_change(update)
-            # Edited greetings must not reactivate an obsolete message.
             message=getattr(update,'message',None)
-            if message:
-                await self.capture_welcome(context.bot,message)
+            if not message or message.chat.id not in self.by_chat:
+                return
+            users=list(getattr(message,'new_chat_members',None) or [])
+            leaving=getattr(message,'left_chat_member',None)
+            if leaving:
+                users.append(leaving)
+            for user in users:
+                if user.is_bot:
+                    continue
+                old=SimpleNamespace(status='member' if leaving else 'left',is_member=False)
+                new=SimpleNamespace(status='left' if leaving else 'member',is_member=False,user=user)
+                event=SimpleNamespace(chat=message.chat,date=message.date,old_chat_member=old,new_chat_member=new,from_user=getattr(message,'from_user',None))
+                self.record_change(SimpleNamespace(update_id=update.update_id,chat_member=event),source='SERVICIO')
         except Exception:
-            LOG.exception('Modulo de bienvenidas: evento no procesado; moderacion continua')
+            LOG.exception('Registro de miembros: evento no procesado; moderacion continua')
 
     def data(self,uid):
         with self.db() as c:
@@ -299,6 +317,14 @@ class WelcomeService:
             with self.db() as c:
                 c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('destination_status',?)",('Acceso confirmado · '+self.destination_label,))
             self.destination_checked=time.time()
+            with self.db() as c:
+                ready=c.execute("SELECT value FROM bienvenida_meta WHERE key='registration_ready_revision'").fetchone()
+            if not ready or ready['value']!='candidate.3':
+                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · CANDIDATA 3\n\nDestino comprobado. Los nuevos ingresos, salidas y reingresos de los 12 grupos se registrarán aquí en fichas por usuario. La limpieza de bienvenidas está desactivada.',disable_notification=True)
+                if self.destination_thread is not None: params['message_thread_id']=self.destination_thread
+                await bot.send_message(**params)
+                with self.db() as c:
+                    c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('registration_ready_revision','candidate.3')")
         except Exception as exc:
             self.destination_checked=0
             self.archive_error='No puedo publicar en el grupo de registro: '+str(exc)
@@ -375,14 +401,13 @@ class WelcomeService:
                     last_probe=time.time()
                     try: await self.check_destination(bot,force=True)
                     except Exception: LOG.warning('Registro privado sin acceso: %s',self.archive_error)
-                await self.clean_pending(bot)
+                if time.monotonic()-last_publish>=3.2:
+                    if await self.publish_one(bot):
+                        last_publish=time.monotonic()
                 with self.db() as c:
                     row=c.execute('SELECT user_id FROM bienvenida_verificaciones WHERE next_try<=? ORDER BY next_try,user_id LIMIT 1',(time.time(),)).fetchone()
                 if row:
                     await self.reconcile(bot,row['user_id'])
-                if time.monotonic()-last_publish>=3.2:
-                    if await self.publish_one(bot):
-                        last_publish=time.monotonic()
             except Exception:
                 LOG.exception('Trabajador de bienvenidas: reintentando')
             await asyncio.sleep(1)
@@ -394,20 +419,18 @@ class WelcomeService:
             cards=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE message_id IS NOT NULL').fetchone()[0]
             queued=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE dirty=1').fetchone()[0]
             failures=c.execute("SELECT chat_id,message_id,error FROM bienvenida_mensajes WHERE error IS NOT NULL ORDER BY sent_at DESC LIMIT 3").fetchall()
-        text=(f'🛂 <b>BIENVENIDAS Y PASAPORTES · CANDIDATA</b>\n\n'
-              f'12 grupos configurados · {linked}/12 bots observados y vinculados\n'
-              f'Bienvenidas pendientes de limpieza: {pending}\n'
+        text=(f'🛂 <b>REGISTRO DE USUARIOS · CANDIDATA 3</b>\n\n'
+              '12 grupos oficiales · Entradas, salidas y reingresos\n'
               f'Fichas publicadas: {cards} · Pendientes: {queued}\n\n'
               'Destino: <code>-1004303379365</code>\n'
               f'Ruta: {html.escape(self.destination_label)}\n'
-              'Una bienvenida por grupo. Una ficha por usuario.\n'
+              'Una ficha por usuario. Limpieza de bienvenidas desactivada.\n'
               'Consultar usuario conocido: /pasaporte seguido de su ID, en privado.\n\n'
-              'Máximo debe ser administrador, poder borrar mensajes y tener recepción Bot-to-Bot habilitada.\n'
-              'Los residuos desconocidos o mayores de 48 h requieren limpieza inicial manual. No se borran mensajes ajenos.\n')
+              'Máximo debe recibir eventos de miembros de los 12 grupos y poder publicar en el destino.\n'
+              'Este registro no depende de leer mensajes de otros bots.\n')
         if self.archive_error:
             text+='\n<b>Archivo pendiente:</b> '+html.escape(self.archive_error[:350])
-        for row in failures:
-            text+=f'\n⚠ {self.by_chat[row["chat_id"]]["short"]} · mensaje {row["message_id"]}: '+html.escape(str(row['error'])[:180])
+
         return text
 
     async def open_passport(self,update,context):

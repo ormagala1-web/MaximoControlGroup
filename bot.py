@@ -266,8 +266,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.18-candidate.2"
-APP_VERSION_TITULO = "BIENVENIDAS Y PASAPORTES · CANDIDATA"
+APP_VERSION = "1.0.18-candidate.3"
+APP_VERSION_TITULO = "REGISTRO DE USUARIOS · CANDIDATA"
 APP_VERSION_FECHA = "24/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
@@ -5501,7 +5501,7 @@ def teclado_centro_control_raiz():
         [InlineKeyboardButton("🧪 GRUPO DE PRUEBAS", callback_data="orma_raiz_pruebas")],
         [InlineKeyboardButton("📜 REGLAS PROTEGIDAS DE RAÍZ", callback_data="orma_raiz_reglas_protegidas")],
         [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
-        [InlineKeyboardButton("🛂 BIENVENIDAS Y PASAPORTES", callback_data="wel:root")],
+        [InlineKeyboardButton("🛂 REGISTRO DE USUARIOS", callback_data="wel:root")],
         [
             InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
             InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),

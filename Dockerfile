@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
 COPY agente_respaldo_remoto.py .
+COPY bienvenidas.py .
+COPY bienvenidas_grupos.json .
+
+RUN python -c "import bienvenidas, json; from pathlib import Path; assert len(json.loads(Path('bienvenidas_grupos.json').read_text(encoding='utf-8')))==12; print('Registro: modulo y mapa presentes')"
 
 CMD ["python", "bot.py"]
 

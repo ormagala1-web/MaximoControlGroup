@@ -266,8 +266,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.18-candidate.3"
-APP_VERSION_TITULO = "REGISTRO DE USUARIOS · CANDIDATA"
+APP_VERSION = "1.0.18-candidate.5"
+APP_VERSION_TITULO = "FICHAS Y PERMISOS"
 APP_VERSION_FECHA = "24/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
@@ -5501,7 +5501,6 @@ def teclado_centro_control_raiz():
         [InlineKeyboardButton("🧪 GRUPO DE PRUEBAS", callback_data="orma_raiz_pruebas")],
         [InlineKeyboardButton("📜 REGLAS PROTEGIDAS DE RAÍZ", callback_data="orma_raiz_reglas_protegidas")],
         [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
-        [InlineKeyboardButton("🛂 REGISTRO DE USUARIOS", callback_data="wel:root")],
         [
             InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
             InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
@@ -9434,7 +9433,6 @@ async def main():
 
     maximo_app.add_handler(TypeHandler(Update, BIENVENIDAS.observe), group=-20)
     maximo_app.add_handler(CallbackQueryHandler(BIENVENIDAS.callback, pattern=r"^wel:"))
-    maximo_app.add_handler(CommandHandler("pasaporte", BIENVENIDAS.open_passport))
     maximo_app.add_handler(CommandHandler("start", maximo_start))
     maximo_app.add_handler(CommandHandler("estado", maximo_estado))
     maximo_app.add_handler(CommandHandler("orma", orma_comando))

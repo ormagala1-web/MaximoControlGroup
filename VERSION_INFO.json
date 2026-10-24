@@ -1,21 +1,24 @@
 {
-  "project": "MaximoControlGroup_bot",
-  "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.18-candidate.6",
-  "status": "CANDIDATE",
-  "base_version": "1.0.17",
-  "base_commit": "660046d99aa312bcae6a54307009a3afc3362f15",
-  "timezone": "America/Lima",
-  "updated_at": "24/10/2026",
-  "title": "REGISTRO DE USUARIOS",
-  "live_validation": "PENDING_JUSTRUNMY_USER_TEST",
-  "scope": [
-    "Registro de ingresos, salidas y reingresos de los 12 grupos en -1004303379365.",
-    "Incluir modulo y mapa en Docker y validarlos durante la construccion.",
-    "Limpieza de bienvenidas desactivada por instruccion del usuario.",
-    "Conservar moderacion, reglas 12/12, publicidad y datos existentes."
-  ],
-  "revision": 6,
-  "revision_scope": "Una ficha por usuario con cabecera permanente; mover al final por movimiento; control individual, eliminar y Chat ID",
-  "candidate_base_commit": "9de0667"
+    "project":  "MaximoControlGroup_bot",
+    "telegram_bot":  "@MaximoControlGroup_bot",
+    "version":  "1.0.18",
+    "status":  "APPROVED",
+    "base_version":  "1.0.17",
+    "base_commit":  "660046d99aa312bcae6a54307009a3afc3362f15",
+    "timezone":  "America/Lima",
+    "updated_at":  "24/10/2026",
+    "title":  "REGISTRO DE USUARIOS",
+    "live_validation":  "USER_APPROVED_JUSTRUNMY_CANDIDATE",
+    "scope":  [
+                  "Registro de ingresos, salidas y reingresos de los 12 grupos en -1004303379365.",
+                  "Incluir modulo y mapa en Docker y validarlos durante la construccion.",
+                  "Limpieza de bienvenidas desactivada por instruccion del usuario.",
+                  "Conservar moderacion, reglas 12/12, publicidad y datos existentes."
+              ],
+    "revision":  6,
+    "revision_scope":  "Una ficha por usuario con cabecera permanente; mover al final por movimiento; control individual, eliminar y Chat ID",
+    "candidate_base_commit":  "9de0667",
+    "candidate_commit":  "8e5dbcf69f2e2ac10c90fff98527ed9489e2006c",
+    "approval_date":  "24/10/2026",
+    "approval_note":  "Aprobacion expresa del usuario de candidata 6: ficha individual permanente, actividad y control individual."
 }

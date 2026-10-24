@@ -383,7 +383,7 @@ class WelcomeService:
             with self.db() as c:
                 ready=c.execute("SELECT value FROM bienvenida_meta WHERE key='registration_ready_revision'").fetchone()
             if not ready or ready['value']!='candidate.6':
-                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · CANDIDATA 6\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. La limpieza de bienvenidas continúa desactivada.',disable_notification=True)
+                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · v1.0.18 APROBADA\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. La limpieza de bienvenidas continúa desactivada.',disable_notification=True)
                 if self.destination_thread is not None: params['message_thread_id']=self.destination_thread
                 await bot.send_message(**params)
                 with self.db() as c:
@@ -528,7 +528,7 @@ class WelcomeService:
             cards=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE message_id IS NOT NULL').fetchone()[0]
             queued=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE dirty=1').fetchone()[0]
             failures=c.execute("SELECT chat_id,message_id,error FROM bienvenida_mensajes WHERE error IS NOT NULL ORDER BY sent_at DESC LIMIT 3").fetchall()
-        text=(f'🛂 <b>REGISTRO DE USUARIOS · CANDIDATA 4</b>\n\n'
+        text=(f'🛂 <b>REGISTRO DE USUARIOS · v1.0.18 APROBADA</b>\n\n'
               '12 grupos oficiales · Entradas, salidas y reingresos\n'
               f'Fichas publicadas: {cards} · Pendientes: {queued}\n\n'
               'Destino: <code>-1004303379365</code>\n'

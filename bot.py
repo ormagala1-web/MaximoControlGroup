@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
+from bienvenidas import WelcomeService
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.constants import ChatType
@@ -232,6 +233,7 @@ BOTS_OFICIALES_EXENTOS = {
     "groupanonymousbot",
 }
 
+BIENVENIDAS = None
 MAXIMO_APP_REF = None
 UNION_APP_REF = None
 
@@ -264,9 +266,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.17"
-APP_VERSION_TITULO = "FICHAS Y PERMISOS"
-APP_VERSION_FECHA = "14/10/2026"
+APP_VERSION = "1.0.18-candidate.1"
+APP_VERSION_TITULO = "BIENVENIDAS Y PASAPORTES · CANDIDATA"
+APP_VERSION_FECHA = "24/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -5499,6 +5501,7 @@ def teclado_centro_control_raiz():
         [InlineKeyboardButton("🧪 GRUPO DE PRUEBAS", callback_data="orma_raiz_pruebas")],
         [InlineKeyboardButton("📜 REGLAS PROTEGIDAS DE RAÍZ", callback_data="orma_raiz_reglas_protegidas")],
         [InlineKeyboardButton("📊 AUDITORÍA DE RAÍZ", callback_data="orma_raiz_auditoria")],
+        [InlineKeyboardButton("🛂 BIENVENIDAS Y PASAPORTES", callback_data="wel:root")],
         [
             InlineKeyboardButton("🏠 MENÚ PRINCIPAL", callback_data="orma_menu_principal"),
             InlineKeyboardButton("🗑 CERRAR", callback_data="orma_cerrar"),
@@ -9416,9 +9419,11 @@ async def detener_aplicacion(application: Application):
 
 
 async def main():
-    global MAXIMO_APP_REF, UNION_APP_REF
+    global MAXIMO_APP_REF, UNION_APP_REF, BIENVENIDAS
 
     inicializar_base_datos()
+    BIENVENIDAS = WelcomeService(DATABASE_PATH, es_administrador_maximo)
+    BIENVENIDAS.initialize()
     iniciar_agente_respaldo()
 
     maximo_app = Application.builder().token(BOT_TOKEN).build()
@@ -9427,6 +9432,9 @@ async def main():
     MAXIMO_APP_REF = maximo_app
     UNION_APP_REF = union_app
 
+    maximo_app.add_handler(TypeHandler(Update, BIENVENIDAS.observe), group=-20)
+    maximo_app.add_handler(CallbackQueryHandler(BIENVENIDAS.callback, pattern=r"^wel:"))
+    maximo_app.add_handler(CommandHandler("pasaporte", BIENVENIDAS.open_passport))
     maximo_app.add_handler(CommandHandler("start", maximo_start))
     maximo_app.add_handler(CommandHandler("estado", maximo_estado))
     maximo_app.add_handler(CommandHandler("orma", orma_comando))
@@ -9522,6 +9530,7 @@ async def main():
     # conserva el comportamiento previo para no alterar su flujo privado.
     await iniciar_aplicacion(maximo_app, drop_pending_updates=False)
     await iniciar_aplicacion(union_app, drop_pending_updates=True)
+    BIENVENIDAS.start(maximo_app.bot)
 
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")
@@ -9535,6 +9544,7 @@ async def main():
     try:
         await asyncio.Event().wait()
     finally:
+        await BIENVENIDAS.stop()
         await detener_aplicacion(union_app)
         await detener_aplicacion(maximo_app)
 

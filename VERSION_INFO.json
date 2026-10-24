@@ -1,93 +1,18 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.17",
-  "status": "APPROVED",
-  "base_version": "1.0.16",
-  "base_commit": "4454362c8634f1e3c4ac13ca68ac719ad672c63f",
+  "version": "1.0.18-candidate.1",
+  "status": "CANDIDATE",
+  "base_version": "1.0.17",
+  "base_commit": "660046d99aa312bcae6a54307009a3afc3362f15",
   "timezone": "America/Lima",
-  "updated_at": "14/10/2026",
-  "title": "FICHAS Y PERMISOS",
-  "live_validation": "USER_APPROVED_REAL_TESTS_NOT_CONFIRMED",
-  "database_migration": [],
-  "functional_audit": {
-    "callbacks": 1233,
-    "screens": 1294,
-    "client_openings": 105,
-    "pages": 210,
-    "functional_checks": 14,
-    "malformed": 0
-  },
-  "permissions_audit": {
-    "permission_fields": 16,
-    "asserted_cases": 96,
-    "callbacks": 386,
-    "screens": 383,
-    "api": "restrict_chat_member; independent=True; post-read verification",
-    "real_telegram": "not contacted"
-  },
-  "interface_audit": {
-    "clients": 105,
-    "variants": 525,
-    "valid_pages": 945,
-    "missing_navigation": 0,
-    "html_errors": 0,
-    "oversize": 0,
-    "permission_screens": 22
-  },
-  "protected_functions": [
-    "inicializar_base_datos",
-    "obtener_estado_membresia_7de7",
-    "control_membresia_grupos",
-    "control_anti_evasion_spam",
-    "control_comandos_exclusivos_raiz",
-    "control_publicidad_individual_grupos",
-    "evaluar_control_publicidad",
-    "control_efectivo_para_chat",
-    "actualizar_control_identidad_db",
-    "actualizar_control_grupo_db",
-    "copiar_global_a_grupo_db",
-    "ejecutar_moderacion_grupo_orma",
-    "eliminar_origen_supervision_callback",
-    "replicar_actividad_humana_supervision",
-    "replicar_publicacion_restringida",
-    "es_bot_oficial_exento",
-    "main"
-  ],
-  "changed_functions": [
-    "safe_edit_message_text",
-    "safe_query_edit_message",
-    "teclado_ficha_orma",
-    "_lineas_control_grupo_ficha",
-    "construir_texto_ficha_orma",
-    "mostrar_ficha_orma_privada",
-    "orma_callback",
-    "procesar_entrada_control_publicidad"
-  ],
-  "added_functions": [
-    "paginas_html_panel",
-    "texto_panel_seguro",
-    "texto_permiso_borrador",
-    "teclado_grupos_permisos",
-    "teclado_editor_permisos",
-    "texto_editor_permisos",
-    "permisos_actuales_usuario",
-    "aplicar_permisos_individuales",
-    "permisos_individuales_callback"
-  ],
-  "revision": 2,
-  "revision_base_commit": "c885c1f",
-  "revision_scope": "Filtro de membresía actual en permisos individuales",
-  "membership_audit": {
-    "cases": 12,
-    "writes_absent": 0,
-    "eligible_groups": [
-      5,
-      6,
-      7
-    ],
-    "ui_checks": 11
-  },
-  "approval_date": "14/10/2026",
-  "approval_note": "Revision 2 aprobada expresamente por el usuario"
+  "updated_at": "24/10/2026",
+  "title": "BIENVENIDAS Y PASAPORTES",
+  "live_validation": "PENDING_JUSTRUNMY_USER_TEST",
+  "scope": [
+    "Una ultima bienvenida por grupo, asociada al bot oficial y persistida.",
+    "Expediente por usuario y movimientos en grupo -1004303379365 tema 3.",
+    "Conservar moderacion, publicidad, /orma, membresia 12/12 y bots exentos.",
+    "No expira saludos automaticamente ni intenta borrar mensajes desconocidos."
+  ]
 }

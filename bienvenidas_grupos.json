@@ -1,0 +1,98 @@
+[
+  {
+    "order": 1,
+    "name": "DISTRITO STREAMING UNIVERSAL 🌎🌍",
+    "short": "Distrito",
+    "username": "DistritoStreamingUniversal",
+    "chat_id": -1004439810137,
+    "bot_username": "DistritoStreamingUniversal_Bot"
+  },
+  {
+    "order": 2,
+    "name": "STREAMING DIGITAL PERUCHO 🇵🇪",
+    "short": "Perucho",
+    "username": "StreamingDigitalPerucho",
+    "chat_id": -1003979507133,
+    "bot_username": "StreamingDigitalPerucho_bot"
+  },
+  {
+    "order": 3,
+    "name": "PERÚ ENTRETENIMIENTO STREAMING 🇵🇪",
+    "short": "Perú Entret.",
+    "username": "PeruEntretenimientoStreaming",
+    "chat_id": -1004422680165,
+    "bot_username": "PeruEntretenimientoStreaming_Bot"
+  },
+  {
+    "order": 4,
+    "name": "MUNDO CACHINERO STREAMING 🌎",
+    "short": "Cachinero",
+    "username": "MundoCachineroStreaming",
+    "chat_id": -1004377676143,
+    "bot_username": "MUCASTBOT"
+  },
+  {
+    "order": 5,
+    "name": "🌎 UNIVERSO CIBERNÉTICO PERÚ 🇵🇪",
+    "short": "Universo",
+    "username": "mundocibertetico",
+    "chat_id": -1001925756345,
+    "bot_username": "UniversoCibertneticoPeru_bot"
+  },
+  {
+    "order": 6,
+    "name": "💻 Metaverso Streaming Perú 🇵🇪",
+    "short": "Metaverso",
+    "username": "metaversostreaminggo",
+    "chat_id": -1001826153639,
+    "bot_username": "MetaversoPeru_bot"
+  },
+  {
+    "order": 7,
+    "name": "🎭 MUNDO STREAMING PERÚ 🇵🇪",
+    "short": "Mundo Stream.",
+    "username": "mymundostreaming",
+    "chat_id": -1001552260050,
+    "bot_username": "MundoStreamingPeru_bot"
+  },
+  {
+    "order": 8,
+    "name": "👑 Club Premium Latino Digital",
+    "short": "Club Premium",
+    "username": "Club_Premium_Latino_Digital",
+    "chat_id": -1003978700843,
+    "bot_username": "Club_Premium_Latino_bot"
+  },
+  {
+    "order": 9,
+    "name": "🎬 Mundo Play | Entretenimiento Digital",
+    "short": "Mundo Play",
+    "username": "Mundo_Play_E_Digital",
+    "chat_id": -1003931120063,
+    "bot_username": "Mundo_Play_E_Digital_bot"
+  },
+  {
+    "order": 10,
+    "name": "⚡ CONECTA2 STREAMING & SERVICIOS",
+    "short": "Conecta2",
+    "username": "Conectados_Streaming_Servicios",
+    "chat_id": -1003726481086,
+    "bot_username": "Conecta2_Streaming_bot"
+  },
+  {
+    "order": 11,
+    "name": "🌎 Imperio Digital | Streaming & Servicios",
+    "short": "Imperio",
+    "username": "Imperio_Digital_Streaming",
+    "chat_id": -1004423452394,
+    "bot_username": "Imperio_Digital_Streaming_bot"
+  },
+  {
+    "order": 12,
+    "name": "💠 The Digital Club | Perú & Latam",
+    "short": "Digital Club",
+    "username": "The_Digital_Club_Peru_Latam",
+    "chat_id": -1004405432244,
+    "bot_username": "The_Digital_Club_Peru_Latam_bot"
+  }
+]

@@ -40,8 +40,8 @@ class WelcomeService:
     def __init__(self, database, authorized, notify_admin=None):
         self.database = str(database)
         self.authorized = authorized
-        self.groups = json.loads(Path(__file__).with_name('bienvenidas_grupos.json').read_text(encoding='utf-8'))
-        self.by_chat = {g['chat_id']: g for g in self.groups}
+        self.groups = json.loads(Path(__file__).with_name('registro_grupos.json').read_text(encoding='utf-8'))
+        self.by_chat = {g['chat_id']: g for g in self.groups if g['chat_id'] is not None}
         self.locks = {}
         self.task = None
         self.delivery_lock = asyncio.Lock()
@@ -104,6 +104,10 @@ class WelcomeService:
             if not c.execute("SELECT 1 FROM bienvenida_meta WHERE key='card_design_revision_6'").fetchone():
                 c.execute("UPDATE bienvenida_fichas SET dirty=1,next_try=0,revision=revision+1 WHERE hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos)")
                 c.execute("INSERT INTO bienvenida_meta VALUES('card_design_revision_6',?)",(stamp(),))
+            if not c.execute("SELECT 1 FROM bienvenida_meta WHERE key='registro_21_revision_1'").fetchone():
+                c.execute("UPDATE bienvenida_fichas SET dirty=1,next_try=0,revision=revision+1 WHERE hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos)")
+                c.execute("INSERT OR IGNORE INTO bienvenida_verificaciones(user_id) SELECT user_id FROM bienvenida_usuarios_vivos")
+                c.execute("INSERT INTO bienvenida_meta VALUES('registro_21_revision_1',?)",(stamp(),))
             if c.execute("SELECT 1 FROM bienvenida_meta WHERE key='import_r028'").fetchone():
                 return
             for u in c.execute('SELECT user_id,username,nombre,fecha_primer_contacto,fecha_actualizacion FROM usuarios_membresia').fetchall():
@@ -253,6 +257,7 @@ class WelcomeService:
                 self.record_change(SimpleNamespace(update_id=update.update_id,chat_member=event),source='SERVICIO')
         except Exception:
             LOG.exception('Registro de miembros: evento no procesado; moderacion continua')
+            return False
 
     def data(self,uid):
         with self.db() as c:
@@ -279,7 +284,7 @@ class WelcomeService:
         text=(f'🛂 <b>FICHA INDIVIDUAL · REGISTRO EN VIVO</b>\n━━━━━━━━━━━━━━━━━━━━\n'
               f'<b>{html.escape(user["name"][:200])}</b>\n'
               f'🆔 <b>ID:</b> <code>{uid}</code>\n👤 <b>USER:</b> {username}\n\n'
-              f'🟢 {inside} dentro · 🔴 {outside} fuera · ⚪ {12-inside-outside} sin verificar\n')
+              f'🟢 {inside} dentro · 🔴 {outside} fuera · ⚪ {len(self.groups)-inside-outside} sin verificar\n')
         if last:
             current=self.by_chat[last['chat_id']]
             text+=f'\n<b>ÚLTIMA ACTIVIDAD</b>\n{last["kind"]} · {html.escape(current["name"])}\nChat ID: <code>{current["chat_id"]}</code>\n🕒 {visible_date(last["occurred_at"])}\n'
@@ -295,12 +300,15 @@ class WelcomeService:
             state=states.get(g['chat_id'],{}).get('present')
             mark='🟢' if state==1 else ('🔴' if state==0 else '⚪')
             buttons.append(B(f'{mark} {g["short"]}',callback_data=f'wel:g:{uid}:{g["order"]}'))
-        rows=[buttons[i:i+3] for i in range(0,12,3)]
-        rows += [[B('📖 MOVIMIENTOS',callback_data=f'wel:h:{uid}:0'),B('🔄 VERIFICAR 12/12',callback_data=f'wel:v:{uid}')]]
+        rows=[buttons[i:i+3] for i in range(0,len(buttons),3)]
+        rows += [[B('📖 MOVIMIENTOS',callback_data=f'wel:h:{uid}:0'),B('🔄 VERIFICAR 21/21',callback_data=f'wel:v:{uid}')]]
         profile=B('👤 ABRIR PERFIL',url='https://t.me/'+user['username']) if user and user['username'] and all(ch.isascii() and (ch.isalnum() or ch=='_') for ch in user['username']) else B('👤 IDENTIDAD',callback_data=f'wel:i:{uid}')
         rows.append([profile,B('🛂 FICHA PRINCIPAL',callback_data=f'wel:p:{uid}')])
         group=self.selected_group(uid)
-        rows.append([B('🛡 CONTROL INDIVIDUAL /ORMA',url=f'https://t.me/MaximoControlGroup_bot?start=registro_{uid}_{group["order"]}')])
+        if not group.get('registration_only'):
+            rows.append([B('🛡 CONTROL INDIVIDUAL /ORMA',url=f'https://t.me/MaximoControlGroup_bot?start=registro_{uid}_{group["order"]}')])
+        else:
+            rows.append([B('ℹ️ SOLO REGISTRO · SIN RESTRICCIONES',callback_data=f'wel:r:{uid}')])
         rows.append([B('🗑 ELIMINAR ESTE MENSAJE',callback_data=f'wel:d:{uid}')])
         return InlineKeyboardMarkup(rows)
 
@@ -312,7 +320,7 @@ class WelcomeService:
         entries=[e for e in events if e['kind']=='ENTRADA'];exits=[e for e in events if e['kind']!='ENTRADA']
         state=states.get(g['chat_id'],{});present=state.get('present')
         label='🟢 DENTRO' if present==1 else ('🔴 FUERA' if present==0 else '⚪ SIN VERIFICAR')
-        return (f'<b>GRUPO SELECCIONADO</b>\n<b>{html.escape(g["name"])}</b>\nChat ID: <code>{g["chat_id"]}</code> · {label}\n\n'
+        return (f'<b>GRUPO SELECCIONADO</b>\n<b>{html.escape(g["name"])}</b>\nChat ID: <code>{g['chat_id'] if g['chat_id'] is not None else 'Pendiente de resolver'}</code> · {label}\n\n'
                 f'Primer ingreso: {visible_date(entries[0]["occurred_at"] if entries else None)}\n'
                 f'Último ingreso: {visible_date(entries[-1]["occurred_at"] if entries else None)}\n'
                 f'Última salida: {visible_date(exits[-1]["occurred_at"] if exits else None)}\n'
@@ -327,7 +335,7 @@ class WelcomeService:
             live=c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone()
         group=next((g for g in self.groups if g['order']==order),None)
         user,_,_=self.data(uid)
-        return (user,group) if live and user and group else (None,None)
+        return (user,group) if live and user and group and not group.get('registration_only') else (None,None)
 
     def history_text(self,uid,page):
         with self.db() as c:
@@ -342,6 +350,9 @@ class WelcomeService:
         failed=[]
         delay=60
         for g in self.groups:
+            if g['chat_id'] is None:
+                failed.append('ID pendiente: @'+g['username'])
+                continue
             with self.db() as c:
                 previous=c.execute('SELECT * FROM bienvenida_estados WHERE user_id=? AND chat_id=?',(uid,g['chat_id'])).fetchone()
                 baseline=dict(previous) if previous else None
@@ -383,7 +394,7 @@ class WelcomeService:
             with self.db() as c:
                 ready=c.execute("SELECT value FROM bienvenida_meta WHERE key='registration_ready_revision'").fetchone()
             if not ready or ready['value']!='candidate.6':
-                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · v1.0.18 APROBADA\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. La limpieza de bienvenidas continúa desactivada.',disable_notification=True)
+                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · v1.0.20-rc.1 CANDIDATA\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. Las bienvenidas personalizadas se conservan. Se eliminan los avisos de ingreso en los 21 grupos cuando Telegram lo permite.',disable_notification=True)
                 if self.destination_thread is not None: params['message_thread_id']=self.destination_thread
                 await bot.send_message(**params)
                 with self.db() as c:
@@ -528,14 +539,14 @@ class WelcomeService:
             cards=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE message_id IS NOT NULL').fetchone()[0]
             queued=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE dirty=1').fetchone()[0]
             failures=c.execute("SELECT chat_id,message_id,error FROM bienvenida_mensajes WHERE error IS NOT NULL ORDER BY sent_at DESC LIMIT 3").fetchall()
-        text=(f'🛂 <b>REGISTRO DE USUARIOS · v1.0.18 APROBADA</b>\n\n'
-              '12 grupos oficiales · Entradas, salidas y reingresos\n'
+        text=(f'🛂 <b>REGISTRO DE USUARIOS · v1.0.20-rc.1 CANDIDATA</b>\n\n'
+              '21 grupos registrados · Entradas, salidas y reingresos\n'
               f'Fichas publicadas: {cards} · Pendientes: {queued}\n\n'
               'Destino: <code>-1004303379365</code>\n'
               f'Ruta: {html.escape(self.destination_label)}\n'
-              'Una ficha por usuario. Limpieza de bienvenidas desactivada.\n'
+              'Una ficha por usuario. Bienvenidas personalizadas conservadas. Avisos de ingreso con limpieza automática.\n'
               'Consultar usuario conocido: /pasaporte seguido de su ID, en privado.\n\n'
-              'Máximo debe recibir eventos de miembros de los 12 grupos y poder publicar en el destino.\n'
+              'Máximo debe recibir eventos de miembros de los 21 grupos y poder publicar en el destino.\n'
               'Este registro no depende de leer mensajes de otros bots.\n')
         if self.archive_error:
             text+='\n<b>Archivo pendiente:</b> '+html.escape(self.archive_error[:350])
@@ -593,6 +604,9 @@ class WelcomeService:
                 user,_,_=self.data(uid)
                 await q.answer('ID: '+str(uid)+' · USER: '+('@'+user['username'] if user['username'] else 'Sin @usuario público'),show_alert=True)
                 return
+            if parts[1]=='r':
+                await q.answer('Estos nueve grupos sólo tienen registro y limpieza del aviso de ingreso. No se aplican reglas de moderación.',show_alert=True)
+                return
             if parts[1]=='v':
                 with self.db() as c:
                     c.execute('INSERT INTO bienvenida_verificaciones(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET next_try=0',(uid,))
@@ -604,7 +618,7 @@ class WelcomeService:
                 await q.answer('Vista no disponible.',show_alert=True)
                 return
             value=int(parts[3]) if kind in ('g','h') else 0
-            if kind=='g' and value not in range(1,13):
+            if kind=='g' and value not in {g['order'] for g in self.groups}:
                 await q.answer('Grupo no válido.',show_alert=True)
                 return
             with self.db() as c:

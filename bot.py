@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
 from bienvenidas import WelcomeService
+from registro21 import Registry21
 from pertenencia_consulta import MembershipService, bind_service
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
@@ -267,8 +268,8 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.19"
-APP_VERSION_TITULO = "APROBADA · CONSULTA 12+9"
+APP_VERSION = "1.0.20-rc.1"
+APP_VERSION_TITULO = "CANDIDATA · REGISTRO 21 Y LIMPIEZA DE INGRESOS"
 APP_VERSION_FECHA = "27/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
@@ -9455,12 +9456,14 @@ async def main():
     union_app = Application.builder().token(UNION_BOT_TOKEN).build()
 
     membership_service = MembershipService(maximo_app.bot)
+    registry21 = Registry21(BIENVENIDAS, membership_service)
+    maximo_app.add_handler(TypeHandler(Update, registry21.observe), group=-40)
     maximo_app.add_handler(TypeHandler(Update, membership_service.observe), group=-30)
 
     MAXIMO_APP_REF = maximo_app
     UNION_APP_REF = union_app
 
-    maximo_app.add_handler(TypeHandler(Update, BIENVENIDAS.observe), group=-20)
+    # Registro de miembros atendido una sola vez por registry21, antes de la barrera 12+9.
     maximo_app.add_handler(CallbackQueryHandler(BIENVENIDAS.callback, pattern=r"^wel:"))
     maximo_app.add_handler(CommandHandler("start", maximo_start))
     maximo_app.add_handler(CommandHandler("estado", maximo_estado))
@@ -9558,6 +9561,7 @@ async def main():
     await iniciar_aplicacion(maximo_app, drop_pending_updates=False)
     bind_service(membership_service)
     await iniciar_aplicacion(union_app, drop_pending_updates=True)
+    registry21.start(maximo_app.bot)
     BIENVENIDAS.start(maximo_app.bot)
 
     logging.info("@MaximoControlGroup_bot iniciado.")
@@ -9574,6 +9578,7 @@ async def main():
     finally:
         membership_service.closed = True
         bind_service(None)
+        await registry21.stop()
         await BIENVENIDAS.stop()
         await detener_aplicacion(union_app)
         await detener_aplicacion(maximo_app)

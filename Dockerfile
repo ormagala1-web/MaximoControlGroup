@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
 COPY agente_respaldo_remoto.py .
 COPY bienvenidas.py .
+COPY registro21.py .
+COPY registro_grupos.json .
 COPY bienvenidas_grupos.json .
 COPY pertenencia_consulta.py .
 COPY pertenencia_grupos.json .
@@ -19,6 +21,8 @@ COPY pertenencia_grupos.json .
 RUN python -c "import bienvenidas, json; from pathlib import Path; assert len(json.loads(Path('bienvenidas_grupos.json').read_text(encoding='utf-8')))==12; print('Registro: modulo y mapa presentes')"
 
 RUN python -c "import pertenencia_consulta, json; from pathlib import Path; g=json.loads(Path('pertenencia_grupos.json').read_text(encoding='utf-8')); assert len(g)==21 and sum(x['query_only'] for x in g)==9; print('Consulta aislada 12+9: OK')"
+
+RUN python -c "import registro21, json; from pathlib import Path; g=json.loads(Path('registro_grupos.json').read_text(encoding='utf-8')); assert len(g)==21 and sum(x['registration_only'] for x in g)==9; print('Registro aislado 21: OK')"
 
 CMD ["python", "bot.py"]
 

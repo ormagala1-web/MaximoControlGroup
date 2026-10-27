@@ -1,23 +1,27 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.19",
-  "status": "APPROVED",
-  "base_version": "1.0.18",
-  "base_commit": "5b24c3c130aca8f49149bc9212f8b0938bf219b7",
+  "version": "1.0.20-rc.1",
+  "status": "CANDIDATE",
+  "base_version": "1.0.19",
+  "base_commit": "49aa90476c48211a3226d3dee03bf35187e797d0",
   "timezone": "America/Lima",
   "updated_at": "27/10/2026",
-  "title": "CONSULTA DE PERTENENCIA PARA MEMBRESIAS",
-  "live_validation": "USER_APPROVED_JUSTRUNMY_CANDIDATE",
+  "title": "REGISTRO 21 Y LIMPIEZA DE AVISOS DE INGRESO",
+  "live_validation": "PENDING",
   "scope": [
-    "Servicio de consulta autenticada para 21 grupos: 12 existentes y 9 adicionales sólo de consulta.",
-    "Barrera para impedir cualquier regla heredada en los 9 nuevos grupos.",
-    "Sin alterar grupos obligatorios, registro histórico, moderación, publicidad ni bienvenidas."
+    "Ficha y movimientos de 21 grupos, conservando los 12 originales y su historial.",
+    "Nueve adicionales sólo de registro, consulta y eliminación del aviso de ingreso; sin reglas heredadas.",
+    "IDs resueltos automáticamente y persistidos; permiso de borrado comprobado.",
+    "Eliminar exclusivamente new_chat_members; conservar bienvenidas personalizadas y otros mensajes.",
+    "Cola persistente con reintentos; no afirmar borrado si Telegram lo impide.",
+    "Conservar integración de Membresías, membresía obligatoria 12/12, reglas, exclusiones y controles existentes."
   ],
-  "revision": 6,
-  "revision_scope": "Consulta de pertenencia 12+9 para Membresias; nueve grupos adicionales aislados de reglas heredadas.",
-  "candidate_base_commit": "5b24c3c130aca8f49149bc9212f8b0938bf219b7",
-  "candidate_commit": "c0cceaed12dfff53f42ca33ea05dee4acb326f8c",
-  "approval_date": "27/10/2026",
-  "approval_note": "Aprobacion expresa del usuario de ambas candidatas, con cierre individual de cada desarrollo. Conexion con Membresias validada, 21 accesos confirmados y cambio de pertenencia comprobado."
+  "revision": 7,
+  "revision_scope": "Registro y ficha de 21 grupos; limpieza exclusiva de avisos de ingreso con moderacion original aislada en 12 grupos.",
+  "candidate_base_commit": "49aa90476c48211a3226d3dee03bf35187e797d0",
+  "candidate_commit": null,
+  "approval_date": null,
+  "approval_note": null,
+  "base_backup": "R032"
 }

@@ -73,56 +73,56 @@
   },
   {
     "username": "Alta_Frecuencia_Streaming",
-    "chat_id": null,
+    "chat_id": -1004317399991,
     "short": "Alta Frecuencia",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Punto_de_Encuentro_latino",
-    "chat_id": null,
+    "chat_id": -1004433173418,
     "short": "Punto Encuentro",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Horizonte_Del_Pacifico_Streaming",
-    "chat_id": null,
+    "chat_id": -1004235409072,
     "short": "Horizonte",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Avenida_Central_Digital",
-    "chat_id": null,
+    "chat_id": -1004341285447,
     "short": "Av. Central",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Circulo_Abierto_Streaming",
-    "chat_id": null,
+    "chat_id": -1004466975322,
     "short": "Círculo Abierto",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Territorio_Indigo_Digital",
-    "chat_id": null,
+    "chat_id": -1004237217727,
     "short": "Territorio Indigo",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "La_Quinta_Avenida_Streaming",
-    "chat_id": null,
+    "chat_id": -1004477701224,
     "short": "Quinta Avenida",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Costa_Dorada_Entretenimiento",
-    "chat_id": null,
+    "chat_id": -1004306362140,
     "short": "Costa Dorada",
-    "query_only": true
+    "query_only": false
   },
   {
     "username": "Nueva_Era_De_Conexiones",
-    "chat_id": null,
+    "chat_id": -100437355828,
     "short": "Nueva Era",
-    "query_only": true
+    "query_only": false
   }
 ]

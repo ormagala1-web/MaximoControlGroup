@@ -192,6 +192,11 @@ DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
 
 TOTAL_GRUPOS_OBLIGATORIOS = 12
 TOTAL_GRUPOS_UNION = 21  # Solo panel, no moderación
+UNION_AUTO_INTERVALO_SEGUNDOS = 30  # Una cuenta por ciclo, limita consultas a Telegram
+UNION_AUTO_REVISION_SEGUNDOS = 600  # No repetir el barrido de un usuario antes de 10 minutos
+UNION_AUTO_TAREA = None
+UNION_AUTO_ULTIMA_REVISION = {}
+UNION_AUTO_BLOQUEOS = {}
 AVISO_MEMBRESIA_SEGUNDOS = 60
 UNION_BOT_USERNAME = "UnionMembresia_bot"
 GRUPO_PRUEBAS_USERNAME = "Orma_Pruebas"
@@ -1616,6 +1621,77 @@ def teclado_union_membresia(estado):
         "🔄 VERIFICAR MEMBRESÍA", callback_data="union_verificar"
     )])
     return InlineKeyboardMarkup(filas)
+
+
+def union_usuario_con_panel(user_id):
+    usuario = obtener_usuario_membresia_db(user_id)
+    return bool(usuario and usuario["union_bot_iniciado"] and usuario["union_panel_message_id"])
+
+
+async def union_actualizar_automaticamente(user_id):
+    """Serializa la actualización de un panel existente; no envía avisos nuevos."""
+    if not union_usuario_con_panel(user_id):
+        return False
+    bloqueo = UNION_AUTO_BLOQUEOS.setdefault(user_id, asyncio.Lock())
+    if bloqueo.locked():
+        return False
+    async with bloqueo:
+        try:
+            resultado = await mostrar_o_actualizar_panel_union(user_id)
+            UNION_AUTO_ULTIMA_REVISION[user_id] = asyncio.get_running_loop().time()
+            return resultado
+        except Exception:
+            logging.exception("Unión 21: actualización automática fallida user=%s", user_id)
+            return False
+
+
+async def union_observar_cambio_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Solo actualiza paneles: no modifica moderación ni registro21."""
+    cambio = update.chat_member
+    if cambio is None or cambio.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        return
+    if estado_es_miembro(cambio.old_chat_member) == estado_es_miembro(cambio.new_chat_member):
+        return
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "pertenencia_grupos.json"), encoding="utf-8") as archivo:
+            catalogo = json.load(archivo)
+        ids = {int(g["chat_id"]) for g in catalogo if g.get("chat_id")}
+        nombres = {g["username"].casefold() for g in catalogo}
+        if cambio.chat.id not in ids and username_chat(cambio.chat).casefold() not in nombres:
+            return
+        user_id = cambio.new_chat_member.user.id
+        if union_usuario_con_panel(user_id):
+            await union_actualizar_automaticamente(user_id)
+    except Exception:
+        logging.exception("Unión 21: no se pudo procesar evento de membresía")
+
+
+async def union_revision_automatica():
+    """Respaldo gradual para eventos ausentes: máximo una cuenta por ciclo."""
+    while True:
+        try:
+            ahora = asyncio.get_running_loop().time()
+            with conectar_db() as conexion:
+                filas = conexion.execute(
+                    "SELECT user_id FROM usuarios_membresia "
+                    "WHERE union_bot_iniciado = 1 AND union_panel_message_id IS NOT NULL "
+                    "ORDER BY user_id"
+                ).fetchall()
+            candidatos = [int(f["user_id"]) for f in filas]
+            vigentes = set(candidatos)
+            for user_id in list(UNION_AUTO_ULTIMA_REVISION):
+                if user_id not in vigentes:
+                    UNION_AUTO_ULTIMA_REVISION.pop(user_id, None)
+                    UNION_AUTO_BLOQUEOS.pop(user_id, None)
+            elegibles = [uid for uid in candidatos if ahora - UNION_AUTO_ULTIMA_REVISION.get(uid, -1e12) >= UNION_AUTO_REVISION_SEGUNDOS]
+            if elegibles:
+                elegido = min(elegibles, key=lambda uid: UNION_AUTO_ULTIMA_REVISION.get(uid, -1e12))
+                await union_actualizar_automaticamente(elegido)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("Unión 21: fallo en revisión automática de respaldo")
+        await asyncio.sleep(UNION_AUTO_INTERVALO_SEGUNDOS)
 
 
 async def mostrar_o_actualizar_panel_union(user_id):
@@ -9550,6 +9626,11 @@ async def main():
         ),
         group=2,
     )
+    # Evento independiente para los 21 grupos, sin ampliar la moderación de 12.
+    maximo_app.add_handler(
+        ChatMemberHandler(union_observar_cambio_grupo, ChatMemberHandler.CHAT_MEMBER),
+        group=-20,
+    )
     maximo_app.add_handler(
         ChatMemberHandler(
             registrar_cambio_membresia_grupo,
@@ -9591,6 +9672,7 @@ async def main():
     await iniciar_aplicacion(union_app, drop_pending_updates=True)
     registry21.start(maximo_app.bot)
     BIENVENIDAS.start(maximo_app.bot)
+    auto_union_task = asyncio.create_task(union_revision_automatica(), name="union21-auto-panel")
 
     logging.info("@MaximoControlGroup_bot iniciado.")
     logging.info("@UnionMembresia_bot iniciado.")
@@ -9606,6 +9688,11 @@ async def main():
     finally:
         membership_service.closed = True
         bind_service(None)
+        auto_union_task.cancel()
+        try:
+            await auto_union_task
+        except asyncio.CancelledError:
+            pass
         await registry21.stop()
         await BIENVENIDAS.stop()
         await detener_aplicacion(union_app)

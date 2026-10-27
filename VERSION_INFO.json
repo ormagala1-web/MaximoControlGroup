@@ -1,24 +1,23 @@
 {
-    "project":  "MaximoControlGroup_bot",
-    "telegram_bot":  "@MaximoControlGroup_bot",
-    "version":  "1.0.18",
-    "status":  "APPROVED",
-    "base_version":  "1.0.17",
-    "base_commit":  "660046d99aa312bcae6a54307009a3afc3362f15",
-    "timezone":  "America/Lima",
-    "updated_at":  "24/10/2026",
-    "title":  "REGISTRO DE USUARIOS",
-    "live_validation":  "USER_APPROVED_JUSTRUNMY_CANDIDATE",
-    "scope":  [
-                  "Registro de ingresos, salidas y reingresos de los 12 grupos en -1004303379365.",
-                  "Incluir modulo y mapa en Docker y validarlos durante la construccion.",
-                  "Limpieza de bienvenidas desactivada por instruccion del usuario.",
-                  "Conservar moderacion, reglas 12/12, publicidad y datos existentes."
-              ],
-    "revision":  6,
-    "revision_scope":  "Una ficha por usuario con cabecera permanente; mover al final por movimiento; control individual, eliminar y Chat ID",
-    "candidate_base_commit":  "9de0667",
-    "candidate_commit":  "8e5dbcf69f2e2ac10c90fff98527ed9489e2006c",
-    "approval_date":  "24/10/2026",
-    "approval_note":  "Aprobacion expresa del usuario de candidata 6: ficha individual permanente, actividad y control individual."
+  "project": "MaximoControlGroup_bot",
+  "telegram_bot": "@MaximoControlGroup_bot",
+  "version": "1.0.19-rc.1",
+  "status": "CANDIDATE",
+  "base_version": "1.0.18",
+  "base_commit": "5b24c3c130aca8f49149bc9212f8b0938bf219b7",
+  "timezone": "America/Lima",
+  "updated_at": "27/10/2026",
+  "title": "CONSULTA DE PERTENENCIA PARA MEMBRESIAS",
+  "live_validation": "PENDING",
+  "scope": [
+    "Servicio de consulta autenticada para 21 grupos: 12 existentes y 9 adicionales sólo de consulta.",
+    "Barrera para impedir cualquier regla heredada en los 9 nuevos grupos.",
+    "Sin alterar grupos obligatorios, registro histórico, moderación, publicidad ni bienvenidas."
+  ],
+  "revision": 6,
+  "revision_scope": "Una ficha por usuario con cabecera permanente; mover al final por movimiento; control individual, eliminar y Chat ID",
+  "candidate_base_commit": "9de0667",
+  "candidate_commit": null,
+  "approval_date": null,
+  "approval_note": null
 }

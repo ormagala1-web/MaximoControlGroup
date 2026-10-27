@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from agente_respaldo_remoto import iniciar_agente_respaldo
 from bienvenidas import WelcomeService
+from pertenencia_consulta import MembershipService, bind_service
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.constants import ChatType
@@ -266,9 +267,9 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.18"
-APP_VERSION_TITULO = "FICHAS Y PERMISOS"
-APP_VERSION_FECHA = "24/10/2026"
+APP_VERSION = "1.0.19-rc.1"
+APP_VERSION_TITULO = "CANDIDATA · CONSULTA 12+9"
+APP_VERSION_FECHA = "27/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
 
 MAXIMO_BOT_USERNAME = "MaximoControlGroup_bot"
@@ -9453,6 +9454,9 @@ async def main():
     maximo_app = Application.builder().token(BOT_TOKEN).build()
     union_app = Application.builder().token(UNION_BOT_TOKEN).build()
 
+    membership_service = MembershipService(maximo_app.bot)
+    maximo_app.add_handler(TypeHandler(Update, membership_service.observe), group=-30)
+
     MAXIMO_APP_REF = maximo_app
     UNION_APP_REF = union_app
 
@@ -9552,6 +9556,7 @@ async def main():
     # deben pasar por la moderación al recuperar el servicio. UnionMembresia
     # conserva el comportamiento previo para no alterar su flujo privado.
     await iniciar_aplicacion(maximo_app, drop_pending_updates=False)
+    bind_service(membership_service)
     await iniciar_aplicacion(union_app, drop_pending_updates=True)
     BIENVENIDAS.start(maximo_app.bot)
 
@@ -9567,6 +9572,8 @@ async def main():
     try:
         await asyncio.Event().wait()
     finally:
+        membership_service.closed = True
+        bind_service(None)
         await BIENVENIDAS.stop()
         await detener_aplicacion(union_app)
         await detener_aplicacion(maximo_app)

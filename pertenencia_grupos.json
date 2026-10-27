@@ -1,0 +1,128 @@
+[
+  {
+    "username": "DistritoStreamingUniversal",
+    "chat_id": -1004439810137,
+    "short": "Distrito",
+    "query_only": false
+  },
+  {
+    "username": "StreamingDigitalPerucho",
+    "chat_id": -1003979507133,
+    "short": "Perucho",
+    "query_only": false
+  },
+  {
+    "username": "PeruEntretenimientoStreaming",
+    "chat_id": -1004422680165,
+    "short": "Perú Entret.",
+    "query_only": false
+  },
+  {
+    "username": "MundoCachineroStreaming",
+    "chat_id": -1004377676143,
+    "short": "Cachinero",
+    "query_only": false
+  },
+  {
+    "username": "mundocibertetico",
+    "chat_id": -1001925756345,
+    "short": "Universo",
+    "query_only": false
+  },
+  {
+    "username": "metaversostreaminggo",
+    "chat_id": -1001826153639,
+    "short": "Metaverso",
+    "query_only": false
+  },
+  {
+    "username": "mymundostreaming",
+    "chat_id": -1001552260050,
+    "short": "Mundo Stream.",
+    "query_only": false
+  },
+  {
+    "username": "Club_Premium_Latino_Digital",
+    "chat_id": -1003978700843,
+    "short": "Club Premium",
+    "query_only": false
+  },
+  {
+    "username": "Mundo_Play_E_Digital",
+    "chat_id": -1003931120063,
+    "short": "Mundo Play",
+    "query_only": false
+  },
+  {
+    "username": "Conectados_Streaming_Servicios",
+    "chat_id": -1003726481086,
+    "short": "Conecta2",
+    "query_only": false
+  },
+  {
+    "username": "Imperio_Digital_Streaming",
+    "chat_id": -1004423452394,
+    "short": "Imperio",
+    "query_only": false
+  },
+  {
+    "username": "The_Digital_Club_Peru_Latam",
+    "chat_id": -1004405432244,
+    "short": "Digital Club",
+    "query_only": false
+  },
+  {
+    "username": "Alta_Frecuencia_Streaming",
+    "chat_id": null,
+    "short": "Alta Frecuencia",
+    "query_only": true
+  },
+  {
+    "username": "Punto_de_Encuentro_latino",
+    "chat_id": null,
+    "short": "Punto Encuentro",
+    "query_only": true
+  },
+  {
+    "username": "Horizonte_Del_Pacifico_Streaming",
+    "chat_id": null,
+    "short": "Horizonte",
+    "query_only": true
+  },
+  {
+    "username": "Avenida_Central_Digital",
+    "chat_id": null,
+    "short": "Av. Central",
+    "query_only": true
+  },
+  {
+    "username": "Circulo_Abierto_Streaming",
+    "chat_id": null,
+    "short": "Círculo Abierto",
+    "query_only": true
+  },
+  {
+    "username": "Territorio_Indigo_Digital",
+    "chat_id": null,
+    "short": "Territorio Indigo",
+    "query_only": true
+  },
+  {
+    "username": "La_Quinta_Avenida_Streaming",
+    "chat_id": null,
+    "short": "Quinta Avenida",
+    "query_only": true
+  },
+  {
+    "username": "Costa_Dorada_Entretenimiento",
+    "chat_id": null,
+    "short": "Costa Dorada",
+    "query_only": true
+  },
+  {
+    "username": "Nueva_Era_De_Conexiones",
+    "chat_id": null,
+    "short": "Nueva Era",
+    "query_only": true
+  }
+]

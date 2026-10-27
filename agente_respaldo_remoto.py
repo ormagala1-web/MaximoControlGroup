@@ -393,6 +393,11 @@ class ManejadorAgente(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        if self.path == "/membership/status":
+            from pertenencia_consulta import handle_http
+            handle_http(self, AGENT_SECRET)
+            return
+
         if self.path not in {"/backup", "/restore"}:
             self._json(404, {"ok": False, "error": "Ruta no encontrada"})
             return

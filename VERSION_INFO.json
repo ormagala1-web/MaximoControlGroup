@@ -1,23 +1,23 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.19-rc.1",
-  "status": "CANDIDATE",
+  "version": "1.0.19",
+  "status": "APPROVED",
   "base_version": "1.0.18",
   "base_commit": "5b24c3c130aca8f49149bc9212f8b0938bf219b7",
   "timezone": "America/Lima",
   "updated_at": "27/10/2026",
   "title": "CONSULTA DE PERTENENCIA PARA MEMBRESIAS",
-  "live_validation": "PENDING",
+  "live_validation": "USER_APPROVED_JUSTRUNMY_CANDIDATE",
   "scope": [
     "Servicio de consulta autenticada para 21 grupos: 12 existentes y 9 adicionales sólo de consulta.",
     "Barrera para impedir cualquier regla heredada en los 9 nuevos grupos.",
     "Sin alterar grupos obligatorios, registro histórico, moderación, publicidad ni bienvenidas."
   ],
   "revision": 6,
-  "revision_scope": "Una ficha por usuario con cabecera permanente; mover al final por movimiento; control individual, eliminar y Chat ID",
-  "candidate_base_commit": "9de0667",
-  "candidate_commit": null,
-  "approval_date": null,
-  "approval_note": null
+  "revision_scope": "Consulta de pertenencia 12+9 para Membresias; nueve grupos adicionales aislados de reglas heredadas.",
+  "candidate_base_commit": "5b24c3c130aca8f49149bc9212f8b0938bf219b7",
+  "candidate_commit": "c0cceaed12dfff53f42ca33ea05dee4acb326f8c",
+  "approval_date": "27/10/2026",
+  "approval_note": "Aprobacion expresa del usuario de ambas candidatas, con cierre individual de cada desarrollo. Conexion con Membresias validada, 21 accesos confirmados y cambio de pertenencia comprobado."
 }

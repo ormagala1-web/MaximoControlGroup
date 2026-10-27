@@ -54,7 +54,10 @@ class Registry21:
   # Registrar antes de eliminar el servicio; la barrera de los nueve actúa después.
   if await self.welcome.observe(update,context) is False:return
   msg=getattr(update,'message',None)
-  if not msg or not getattr(msg,'new_chat_members',None):return
+  if not msg:return
+  entrada=bool(getattr(msg,'new_chat_members',None))
+  salida=getattr(msg,'left_chat_member',None) is not None
+  if not entrada and not salida:return
   with self.welcome.db() as c:c.execute("INSERT OR IGNORE INTO registro_avisos_ingreso(chat_id,message_id,fecha,estado) VALUES(?,?,?,'PENDIENTE')",(chat.id,msg.message_id,msg.date.timestamp()))
   await self.clean(context.bot,chat.id,msg.message_id)
  async def clean(self,bot,chat_id=None,message_id=None):

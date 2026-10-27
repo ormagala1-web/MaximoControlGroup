@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import logging
 import sqlite3
@@ -190,6 +191,7 @@ DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 DATABASE_PATH = os.path.join(DATA_DIR, "maximo_control.db")
 
 TOTAL_GRUPOS_OBLIGATORIOS = 12
+TOTAL_GRUPOS_UNION = 21  # Solo panel, no moderación
 AVISO_MEMBRESIA_SEGUNDOS = 60
 UNION_BOT_USERNAME = "UnionMembresia_bot"
 GRUPO_PRUEBAS_USERNAME = "Orma_Pruebas"
@@ -268,7 +270,7 @@ ENTRADAS_RAIZ = {}
 # Un solo aviso publicitario temporal por identidad y grupo.
 AVISOS_PUBLICIDAD_ACTIVOS = {}
 
-APP_VERSION = "1.0.20-rc.1"
+APP_VERSION = "1.0.20-rc.2"
 APP_VERSION_TITULO = "CANDIDATA · REGISTRO 21 Y LIMPIEZA DE INGRESOS"
 APP_VERSION_FECHA = "27/10/2026"
 AVISO_PUBLICIDAD_SEGUNDOS = 30
@@ -1519,74 +1521,100 @@ async def obtener_estado_membresia_7de7(user_id):
     }
 
 
-def texto_union_membresia(estado):
-    total = estado["total"]
-    completos = len(estado["completados"])
+async def obtener_estado_union(user_id):
+    """Consulta todos los grupos; un error es desconocido, no una salida."""
+    if MAXIMO_APP_REF is None:
+        raise RuntimeError("MaximoControlGroup todavía no está inicializado.")
+    grupos = obtener_grupos_union()
+    completados, faltantes, errores = [], [], []
+    for grupo in grupos:
+        try:
+            miembro = await MAXIMO_APP_REF.bot.get_chat_member(
+                chat_id=f"@{grupo['username']}", user_id=user_id
+            )
+            (completados if estado_es_miembro(miembro) else faltantes).append(grupo)
+        except TelegramError as error:
+            logging.warning("Membresía Unión sin confirmar user=%s grupo=%s: %s",
+                            user_id, grupo["username"], error)
+            errores.append((grupo, str(error)))
+    return {
+        "total": len(grupos), "grupos": grupos, "completados": completados,
+        "faltantes": faltantes, "errores": errores,
+        "completo": len(completados) == TOTAL_GRUPOS_UNION and not errores,
+    }
 
-    if estado["completo"]:
-        return (
-            "✅ <b>MEMBRESÍA COMPLETA</b>\n\n"
-            f"Progreso: <b>{completos}/{total}</b>\n\n"
-            "Ya perteneces a todos los grupos oficiales requeridos.\n\n"
-            "💬 Puedes participar con texto normal.\n"
-            "🛡️ La publicidad quedará sujeta al Control Publicitario General "
-            "cuando activemos ese módulo."
-        )
 
-    lineas = [
-        "🔐 <b>MEMBRESÍA DE USUARIO</b>",
-        "",
-        f"Progreso: <b>{completos}/{total}</b>",
-        "",
-        "Te faltan estos grupos:",
-        "",
+def obtener_grupos_union():
+    """Combina los 12 oficiales con los 9 de consulta sin activar restricciones."""
+    grupos = [dict(g) for g in obtener_grupos_obligatorios_db()]
+    ruta = os.path.join(os.path.dirname(__file__), "pertenencia_grupos.json")
+    with open(ruta, encoding="utf-8") as archivo:
+        catalogo = json.load(archivo)
+    por_username = {g["username"].casefold(): g for g in grupos}
+    for item in catalogo:
+        username = item["username"]
+        if username.casefold() in por_username:
+            por_username[username.casefold()]["nombre_corto"] = item["short"]
+            continue
+        if not item.get("query_only"):
+            raise ValueError(f"Grupo original sin configuración obligatoria: {username}")
+        grupos.append({
+            "username": username,
+            "nombre": item["short"],
+            "nombre_corto": item["short"],
+            "enlace": f"https://t.me/{username}",
+            "orden": len(grupos) + 1,
+        })
+    if len(grupos) != TOTAL_GRUPOS_UNION:
+        raise ValueError(f"Se esperaban 21 grupos de Unión, encontrados {len(grupos)}")
+    return grupos
+
+
+def registrar_verificacion_union_12_db(user_id, estado):
+    """Registra únicamente los 12 grupos obligatorios, no los 9 de consulta."""
+    oficiales = {g["username"].casefold() for g in obtener_grupos_obligatorios_db()}
+    completados = [
+        g for g in estado["completados"]
+        if g["username"].casefold() in oficiales
     ]
+    registrar_verificacion_membresia_db(user_id, {"completados": completados})
 
-    for grupo in estado["faltantes"]:
-        lineas.append(f"❌ {grupo['nombre']}")
 
-    lineas.extend(
-        [
-            "",
-            "Usa los botones de abajo para ingresar.",
-            "Luego pulsa <b>🔄 VERIFICAR MEMBRESÍA</b>.",
-        ]
-    )
-
-    if estado["errores"]:
-        lineas.extend(
-            [
-                "",
-                "⚠️ Alguna comprobación no pudo confirmarse. "
-                "Por seguridad permanece como pendiente.",
-            ]
-        )
-
+def texto_union_membresia(estado):
+    completos = len(estado["completados"])
+    total = estado["total"]
+    pendientes = len(estado["faltantes"])
+    desconocidos = len(estado["errores"])
+    lineas = [
+        "🔐 <b>MEMBRESÍA DE USUARIO</b>", "",
+        f"🟢 Dentro: <b>{completos}</b> · 🔴 Fuera: <b>{pendientes}</b>",
+        f"⚪ Sin verificar: <b>{desconocidos}</b>",
+        f"📊 Membresía: <b>{completos}/{total}</b>", "",
+        "Selecciona un grupo para abrirlo en Telegram.",
+        "Pulsa <b>🔄 VERIFICAR MEMBRESÍA</b> para actualizar.",
+    ]
+    if estado["completo"]:
+        lineas.extend(["", "✅ <b>MEMBRESÍA COMPLETA</b>"])
+    if desconocidos:
+        lineas.extend(["", "⚠️ Algunas comprobaciones no pudieron confirmarse."])
     return "\n".join(lineas)
 
 
 def teclado_union_membresia(estado):
-    filas = []
-
-    for grupo in estado["faltantes"]:
-        filas.append(
-            [
-                InlineKeyboardButton(
-                    f"➕ {grupo['nombre']}",
-                    url=grupo["enlace"],
-                )
-            ]
-        )
-
-    filas.append(
-        [
-            InlineKeyboardButton(
-                "🔄 VERIFICAR MEMBRESÍA",
-                callback_data="union_verificar",
-            )
-        ]
-    )
-
+    dentro = {g["username"].casefold() for g in estado["completados"]}
+    desconocidos = {g["username"].casefold() for g, _ in estado["errores"]}
+    botones = []
+    for grupo in estado["grupos"]:
+        clave = grupo["username"].casefold()
+        marca = "⚪" if clave in desconocidos else ("🟢" if clave in dentro else "🔴")
+        botones.append(InlineKeyboardButton(
+            f"{marca} {grupo.get('nombre_corto') or grupo['nombre']}",
+            url=grupo["enlace"],
+        ))
+    filas = [botones[i:i + 3] for i in range(0, len(botones), 3)]
+    filas.append([InlineKeyboardButton(
+        "🔄 VERIFICAR MEMBRESÍA", callback_data="union_verificar"
+    )])
     return InlineKeyboardMarkup(filas)
 
 
@@ -1594,8 +1622,8 @@ async def mostrar_o_actualizar_panel_union(user_id):
     if UNION_APP_REF is None:
         return False
 
-    estado = await obtener_estado_membresia_7de7(user_id)
-    registrar_verificacion_membresia_db(user_id, estado)
+    estado = await obtener_estado_union(user_id)
+    registrar_verificacion_union_12_db(user_id, estado)
     texto = texto_union_membresia(estado)
     teclado = teclado_union_membresia(estado)
 
@@ -9269,8 +9297,8 @@ async def union_grupos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         union_bot_iniciado=True,
     )
 
-    estado = await obtener_estado_membresia_7de7(usuario.id)
-    registrar_verificacion_membresia_db(usuario.id, estado)
+    estado = await obtener_estado_union(usuario.id)
+    registrar_verificacion_union_12_db(usuario.id, estado)
 
     enviado = await mensaje.reply_text(
         texto_union_membresia(estado),
@@ -9293,15 +9321,15 @@ async def union_verificar_callback(
     if not query or not usuario:
         return
 
-    await query.answer("Verificando los 12 grupos…")
+    await query.answer("Verificando los 21 grupos…")
 
     registrar_usuario_membresia(
         usuario,
         union_bot_iniciado=True,
     )
 
-    estado = await obtener_estado_membresia_7de7(usuario.id)
-    registrar_verificacion_membresia_db(usuario.id, estado)
+    estado = await obtener_estado_union(usuario.id)
+    registrar_verificacion_union_12_db(usuario.id, estado)
 
     try:
         await safe_query_edit_message(query,

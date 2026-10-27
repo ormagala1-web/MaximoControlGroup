@@ -44,6 +44,7 @@ class WelcomeService:
         self.by_chat = {g['chat_id']: g for g in self.groups if g['chat_id'] is not None}
         self.locks = {}
         self.task = None
+        self.verification_task = None
         self.delivery_lock = asyncio.Lock()
         self.boot = time.time()
         self.archive_error = ''
@@ -108,6 +109,12 @@ class WelcomeService:
                 c.execute("UPDATE bienvenida_fichas SET dirty=1,next_try=0,revision=revision+1 WHERE hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos)")
                 c.execute("INSERT OR IGNORE INTO bienvenida_verificaciones(user_id) SELECT user_id FROM bienvenida_usuarios_vivos")
                 c.execute("INSERT INTO bienvenida_meta VALUES('registro_21_revision_1',?)",(stamp(),))
+            c.execute("CREATE TABLE IF NOT EXISTS bienvenida_seguimiento(user_id INTEGER PRIMARY KEY,first_observed_at TEXT NOT NULL,first_kind TEXT NOT NULL)")
+            c.execute("INSERT OR IGNORE INTO bienvenida_seguimiento SELECT user_id,first_entry_at,'ENTRADA' FROM bienvenida_usuarios_vivos")
+            verification_columns={r['name'] for r in c.execute('PRAGMA table_info(bienvenida_verificaciones)')}
+            for column in ('prioridad','revision'):
+                if column not in verification_columns:c.execute('ALTER TABLE bienvenida_verificaciones ADD COLUMN '+column+' INTEGER NOT NULL DEFAULT 0')
+            if 'prioridad' not in columns:c.execute('ALTER TABLE bienvenida_fichas ADD COLUMN prioridad INTEGER NOT NULL DEFAULT 0')
             if c.execute("SELECT 1 FROM bienvenida_meta WHERE key='import_r028'").fetchone():
                 return
             for u in c.execute('SELECT user_id,username,nombre,fecha_primer_contacto,fecha_actualizacion FROM usuarios_membresia').fetchall():
@@ -123,9 +130,9 @@ class WelcomeService:
             c.execute("INSERT INTO bienvenida_meta VALUES('import_r028',?)",(stamp(),))
 
     def dirty(self,c,uid,movement_id=0):
-        if not c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone():return
+        if not c.execute('SELECT 1 FROM bienvenida_seguimiento WHERE user_id=?',(uid,)).fetchone():return
         if movement_id:
-            c.execute('INSERT INTO bienvenida_fichas(user_id,move_event_id) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET dirty=1,revision=revision+1,next_try=0,move_event_id=excluded.move_event_id,hidden=0',(uid,movement_id))
+            c.execute('INSERT INTO bienvenida_fichas(user_id,move_event_id,prioridad) VALUES(?,?,3) ON CONFLICT(user_id) DO UPDATE SET dirty=1,revision=revision+1,next_try=0,move_event_id=excluded.move_event_id,hidden=0,prioridad=3',(uid,movement_id))
             c.execute("INSERT OR REPLACE INTO bienvenida_vistas VALUES(?,'p',0)",(uid,))
         else:
             c.execute('INSERT INTO bienvenida_fichas(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET dirty=CASE WHEN hidden=0 THEN 1 ELSE 0 END,revision=revision+1,next_try=0',(uid,))
@@ -147,8 +154,7 @@ class WelcomeService:
                 return False
             if kind=='ENTRADA':
                 c.execute('INSERT OR IGNORE INTO bienvenida_usuarios_vivos VALUES(?,?)',(user.id,when))
-            elif not c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(user.id,)).fetchone():
-                return False
+            c.execute('INSERT OR IGNORE INTO bienvenida_seguimiento VALUES(?,?,?)',(user.id,when,kind))
             key=f'{source}:{update.update_id}:{event.chat.id}:{user.id}'
             if c.execute('SELECT 1 FROM bienvenida_eventos WHERE event_key IN (?,?)',(key,'tg:'+str(update.update_id))).fetchone():
                 return False
@@ -167,7 +173,8 @@ class WelcomeService:
             recorded=c.execute('SELECT id FROM bienvenida_eventos WHERE event_key=?',(key,)).fetchone()['id']
             latest=c.execute('SELECT id FROM bienvenida_eventos WHERE user_id=? ORDER BY occurred_at DESC,id DESC LIMIT 1',(user.id,)).fetchone()['id']
             self.dirty(c,user.id,movement_id=recorded if recorded==latest and not merged else 0)
-            c.execute('INSERT OR IGNORE INTO bienvenida_verificaciones(user_id) VALUES(?)',(user.id,))
+            LOG.info('Registro 21 movimiento uid=%s grupo=%s tipo=%s origen=%s evento=%s',user.id,event.chat.id,kind,source,recorded)
+            c.execute('INSERT INTO bienvenida_verificaciones(user_id,prioridad) VALUES(?,1) ON CONFLICT(user_id) DO UPDATE SET next_try=0,prioridad=MAX(prioridad,1),revision=revision+1',(user.id,))
         return True
 
     def welcome_group(self, message):
@@ -332,7 +339,7 @@ class WelcomeService:
 
     def control_payload(self,uid,order):
         with self.db() as c:
-            live=c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone()
+            live=c.execute('SELECT 1 FROM bienvenida_seguimiento WHERE user_id=?',(uid,)).fetchone()
         group=next((g for g in self.groups if g['order']==order),None)
         user,_,_=self.data(uid)
         return (user,group) if live and user and group and not group.get('registration_only') else (None,None)
@@ -347,6 +354,8 @@ class WelcomeService:
         return body+'\nHora de Perú'
 
     async def reconcile(self,bot,uid):
+        with self.db() as c:job=c.execute('SELECT revision FROM bienvenida_verificaciones WHERE user_id=?',(uid,)).fetchone()
+        job_revision=job['revision'] if job else None
         failed=[]
         delay=60
         for g in self.groups:
@@ -374,9 +383,9 @@ class WelcomeService:
             await asyncio.sleep(0.12)
         with self.db() as c:
             if failed:
-                c.execute('UPDATE bienvenida_verificaciones SET next_try=?,error=? WHERE user_id=?',(time.time()+delay, '; '.join(failed)[:800],uid))
+                c.execute('UPDATE bienvenida_verificaciones SET next_try=?,error=? WHERE user_id=? AND revision=?',(time.time()+delay, '; '.join(failed)[:800],uid,job_revision))
             else:
-                c.execute('DELETE FROM bienvenida_verificaciones WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM bienvenida_verificaciones WHERE user_id=? AND revision=?',(uid,job_revision))
 
     async def check_destination(self,bot,force=False):
         if not force and self.destination_checked and time.time()-self.destination_checked<60:
@@ -393,12 +402,12 @@ class WelcomeService:
             self.destination_checked=time.time()
             with self.db() as c:
                 ready=c.execute("SELECT value FROM bienvenida_meta WHERE key='registration_ready_revision'").fetchone()
-            if not ready or ready['value']!='candidate.6':
-                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · v1.0.20-rc.1 CANDIDATA\n\nDestino comprobado. Solo se publican usuarios con un ingreso nuevo desde la activación original del registro. Después se actualizan sus salidas y reingresos. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. Las bienvenidas personalizadas se conservan. Se eliminan los avisos de ingreso en los 21 grupos cuando Telegram lo permite.',disable_notification=True)
+            if not ready or ready['value']!='candidate.8':
+                params=dict(chat_id=DESTINATION,text='🛂 REGISTRO DE USUARIOS ACTIVO · v1.0.20-rc.2 CANDIDATA\n\nDestino comprobado. Se registran entradas, salidas y reingresos nuevos desde la activación original. Una salida real también inicia el seguimiento, sin inventar un ingreso previo. No se incorporan miembros antiguos por consultar su estado. Todos los botones y consultas se atienden en este grupo. Las bienvenidas personalizadas se conservan. Se eliminan los avisos de ingreso en los 21 grupos cuando Telegram lo permite.',disable_notification=True)
                 if self.destination_thread is not None: params['message_thread_id']=self.destination_thread
                 await bot.send_message(**params)
                 with self.db() as c:
-                    c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('registration_ready_revision','candidate.6')")
+                    c.execute("INSERT OR REPLACE INTO bienvenida_meta VALUES('registration_ready_revision','candidate.8')")
         except Exception as exc:
             self.destination_checked=0
             self.archive_error='No puedo publicar en el grupo de registro: '+str(exc)
@@ -435,7 +444,7 @@ class WelcomeService:
 
     async def _publish_one_unlocked(self,bot):
         with self.db() as c:
-            row=c.execute('SELECT * FROM bienvenida_fichas WHERE dirty=1 AND hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_usuarios_vivos) AND next_try<=? ORDER BY CASE WHEN move_event_id>published_event_id THEN 0 ELSE 1 END,move_event_id,next_try,user_id LIMIT 1',(time.time(),)).fetchone()
+            row=c.execute('SELECT * FROM bienvenida_fichas WHERE dirty=1 AND hidden=0 AND user_id IN (SELECT user_id FROM bienvenida_seguimiento) AND next_try<=? ORDER BY prioridad DESC,CASE WHEN move_event_id>published_event_id THEN 0 ELSE 1 END,move_event_id,next_try,user_id LIMIT 1',(time.time(),)).fetchone()
         if not row:
             return False
         uid=row['user_id']; message_id=row['message_id']
@@ -468,7 +477,7 @@ class WelcomeService:
                     raise
                 message_id=result.message_id
             with self.db() as c:
-                c.execute('UPDATE bienvenida_fichas SET message_id=?,published_event_id=?,dirty=CASE WHEN revision=? THEN 0 ELSE 1 END,error=NULL,next_try=0 WHERE user_id=?',(message_id,row['move_event_id'],row['revision'],uid))
+                c.execute('UPDATE bienvenida_fichas SET message_id=?,published_event_id=?,dirty=CASE WHEN revision=? THEN 0 ELSE 1 END,error=NULL,next_try=0,prioridad=CASE WHEN revision=? THEN 0 ELSE prioridad END WHERE user_id=?',(message_id,row['move_event_id'],row['revision'],row['revision'],uid))
                 if old_message_id and old_message_id!=message_id:
                     c.execute('INSERT OR IGNORE INTO bienvenida_fichas_anteriores(message_id,user_id,replacement_id) VALUES(?,?,?)',(old_message_id,uid,message_id))
             self.archive_error=''
@@ -524,10 +533,7 @@ class WelcomeService:
                         last_publish=time.monotonic()
                     elif await self.retire_previous_card(bot):
                         last_publish=time.monotonic()
-                with self.db() as c:
-                    row=c.execute('SELECT user_id FROM bienvenida_verificaciones WHERE next_try<=? ORDER BY next_try,user_id LIMIT 1',(time.time(),)).fetchone()
-                if row:
-                    await self.reconcile(bot,row['user_id'])
+                # Las consultas tienen un trabajador separado para no demorar movimientos.
             except Exception:
                 LOG.exception('Trabajador de bienvenidas: reintentando')
             await asyncio.sleep(1)
@@ -539,7 +545,7 @@ class WelcomeService:
             cards=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE message_id IS NOT NULL').fetchone()[0]
             queued=c.execute('SELECT COUNT(*) FROM bienvenida_fichas WHERE dirty=1').fetchone()[0]
             failures=c.execute("SELECT chat_id,message_id,error FROM bienvenida_mensajes WHERE error IS NOT NULL ORDER BY sent_at DESC LIMIT 3").fetchall()
-        text=(f'🛂 <b>REGISTRO DE USUARIOS · v1.0.20-rc.1 CANDIDATA</b>\n\n'
+        text=(f'🛂 <b>REGISTRO DE USUARIOS · v1.0.20-rc.2 CANDIDATA</b>\n\n'
               '21 grupos registrados · Entradas, salidas y reingresos\n'
               f'Fichas publicadas: {cards} · Pendientes: {queued}\n\n'
               'Destino: <code>-1004303379365</code>\n'
@@ -560,15 +566,16 @@ class WelcomeService:
         try:
             uid=int(context.args[0])
             with self.db() as c:
-                live=c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone()
+                live=c.execute('SELECT 1 FROM bienvenida_seguimiento WHERE user_id=?',(uid,)).fetchone()
             if uid<=0 or not self.data(uid)[0] or not live:
                 raise ValueError()
         except (IndexError,ValueError):
-            await update.effective_message.reply_text('Solo se publican usuarios con un ingreso nuevo desde la activación del registro en vivo. Usa /pasaporte seguido de su ID.')
+            await update.effective_message.reply_text('Solo se publican perfiles con un movimiento real registrado desde la activación del registro en vivo. Usa /pasaporte seguido de su ID.')
             return
         with self.db() as c:
             self.dirty(c,uid)
-            c.execute('INSERT INTO bienvenida_verificaciones(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET next_try=0',(uid,))
+            c.execute('INSERT INTO bienvenida_verificaciones(user_id,prioridad) VALUES(?,2) ON CONFLICT(user_id) DO UPDATE SET next_try=0,prioridad=2,revision=revision+1',(uid,))
+            c.execute('UPDATE bienvenida_fichas SET prioridad=MAX(prioridad,2) WHERE user_id=?',(uid,))
         await update.effective_message.reply_text(self.card_text(uid),parse_mode='HTML',reply_markup=self.keyboard(uid))
 
     async def callback(self,update,context):
@@ -586,7 +593,7 @@ class WelcomeService:
                 return
             uid=int(parts[2])
             with self.db() as c:
-                live=c.execute('SELECT 1 FROM bienvenida_usuarios_vivos WHERE user_id=?',(uid,)).fetchone()
+                live=c.execute('SELECT 1 FROM bienvenida_seguimiento WHERE user_id=?',(uid,)).fetchone()
                 card=c.execute('SELECT message_id FROM bienvenida_fichas WHERE user_id=?',(uid,)).fetchone()
             if not live or not card or card['message_id']!=q.message.message_id:
                 await q.answer('Esta ficha ya no es la ficha activa del usuario.',show_alert=True)
@@ -609,7 +616,8 @@ class WelcomeService:
                 return
             if parts[1]=='v':
                 with self.db() as c:
-                    c.execute('INSERT INTO bienvenida_verificaciones(user_id) VALUES(?) ON CONFLICT(user_id) DO UPDATE SET next_try=0',(uid,))
+                    c.execute('INSERT INTO bienvenida_verificaciones(user_id,prioridad) VALUES(?,2) ON CONFLICT(user_id) DO UPDATE SET next_try=0,prioridad=2,revision=revision+1',(uid,))
+                    c.execute('UPDATE bienvenida_fichas SET prioridad=MAX(prioridad,2) WHERE user_id=?',(uid,))
                     self.dirty(c,uid)
                 await q.answer('Verificación en cola. Esta ficha se actualizará aquí.')
                 return
@@ -633,11 +641,28 @@ class WelcomeService:
             try:await q.answer('No se pudo actualizar la vista. La ficha se reintentará aquí.',show_alert=True)
             except Exception:pass
 
+    def next_verification(self):
+        with self.db() as c:return c.execute('SELECT user_id FROM bienvenida_verificaciones WHERE next_try<=? ORDER BY prioridad DESC,next_try,user_id LIMIT 1',(time.time(),)).fetchone()
+
+    async def verification_worker(self,bot):
+        while True:
+            try:
+                if time.time()<self.api_pause_until:
+                    await asyncio.sleep(min(5,self.api_pause_until-time.time()))
+                    continue
+                row=self.next_verification()
+                if row:await self.reconcile(bot,row['user_id'])
+            except asyncio.CancelledError:raise
+            except Exception:LOG.exception('Registro 21: verificación pendiente; publicación de movimientos continúa')
+            await asyncio.sleep(1)
+
     def start(self,bot):
         self.task=asyncio.create_task(self.worker(bot),name='bienvenidas-pasaportes')
+        self.verification_task=asyncio.create_task(self.verification_worker(bot),name='registro21-verificaciones')
 
     async def stop(self):
-        if self.task:
-            self.task.cancel()
-            try: await self.task
-            except asyncio.CancelledError: pass
+        tasks=[t for t in (self.task,self.verification_task) if t]
+        for task in tasks:task.cancel()
+        for task in tasks:
+            try:await task
+            except asyncio.CancelledError:pass

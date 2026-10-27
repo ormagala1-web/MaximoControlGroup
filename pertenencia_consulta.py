@@ -38,7 +38,7 @@ class MembershipService:
         self.bot=bot
         self.loop=loop or asyncio.get_running_loop()
         self.groups=json.loads(Path(catalog or Path(__file__).with_name('pertenencia_grupos.json')).read_text(encoding='utf-8-sig'))
-        assert len(self.groups)==21 and sum(bool(g['query_only']) for g in self.groups)==9
+        assert len(self.groups)==21 and all(not g.get('query_only',False) for g in self.groups)
         self.by_name={g['username'].lower():g for g in self.groups}
         assert len(self.by_name)==21
         self.cache=OrderedDict()
@@ -139,8 +139,6 @@ class MembershipService:
                 key=(member.user.id,group['username'].lower())
                 self.put(key,dict(username=group['username'],chat_id=chat.id,member=state_of(member),
                     status=str(member.status),checked_at=stamp(),bot_admin=True,error=None))
-        # Barrera: los nueve destinos nuevos no llegan a ninguna regla heredada.
-        if group['query_only']:raise ApplicationHandlerStop
 
 
 def handle_http(handler,backup_secret):

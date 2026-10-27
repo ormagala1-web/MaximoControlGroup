@@ -1646,24 +1646,50 @@ async def union_actualizar_automaticamente(user_id):
 
 
 async def union_observar_cambio_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Solo actualiza paneles: no modifica moderación ni registro21."""
+    """Escucha tanto chat_member como avisos de ingreso/salida de los 21 grupos.
+
+    El panel administrativo procesa también mensajes de servicio; limitarse a
+    chat_member puede dejar sin actualización al panel privado.
+    """
     cambio = update.chat_member
-    if cambio is None or cambio.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+    mensaje = update.message
+    chat = cambio.chat if cambio is not None else (mensaje.chat if mensaje is not None else None)
+    if chat is None or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
-    if estado_es_miembro(cambio.old_chat_member) == estado_es_miembro(cambio.new_chat_member):
+
+    usuarios = set()
+    if cambio is not None:
+        if estado_es_miembro(cambio.old_chat_member) != estado_es_miembro(cambio.new_chat_member):
+            usuarios.add(cambio.new_chat_member.user.id)
+    if mensaje is not None:
+        usuarios.update(u.id for u in (mensaje.new_chat_members or []))
+        if mensaje.left_chat_member is not None:
+            usuarios.add(mensaje.left_chat_member.id)
+    if not usuarios:
         return
+
     try:
         with open(os.path.join(os.path.dirname(__file__), "pertenencia_grupos.json"), encoding="utf-8") as archivo:
             catalogo = json.load(archivo)
         ids = {int(g["chat_id"]) for g in catalogo if g.get("chat_id")}
         nombres = {g["username"].casefold() for g in catalogo}
-        if cambio.chat.id not in ids and username_chat(cambio.chat).casefold() not in nombres:
+        if chat.id not in ids and username_chat(chat).casefold() not in nombres:
             return
-        user_id = cambio.new_chat_member.user.id
-        if union_usuario_con_panel(user_id):
+        for user_id in usuarios:
+            if not union_usuario_con_panel(user_id):
+                continue
+            # Reconsultar tras el evento: Telegram puede tardar en reflejar
+            # la nueva membresía en get_chat_member.
             await union_actualizar_automaticamente(user_id)
+            asyncio.create_task(union_revalidar_evento(user_id))
     except Exception:
         logging.exception("Unión 21: no se pudo procesar evento de membresía")
+
+
+async def union_revalidar_evento(user_id):
+    """Segunda lectura tras propagación de Telegram, sin mensajes adicionales."""
+    await asyncio.sleep(3)
+    await union_actualizar_automaticamente(user_id)
 
 
 async def union_revision_automatica():
@@ -9626,11 +9652,9 @@ async def main():
         ),
         group=2,
     )
-    # Evento independiente para los 21 grupos, sin ampliar la moderación de 12.
-    maximo_app.add_handler(
-        ChatMemberHandler(union_observar_cambio_grupo, ChatMemberHandler.CHAT_MEMBER),
-        group=-20,
-    )
+    # Evento independiente para los 21 grupos: chat_member y mensajes de servicio.
+    # Se ejecuta antes de que registro21 limpie los avisos de ingreso.
+    maximo_app.add_handler(TypeHandler(Update, union_observar_cambio_grupo), group=-35)
     maximo_app.add_handler(
         ChatMemberHandler(
             registrar_cambio_membresia_grupo,

@@ -5,7 +5,8 @@
     "short": "Distrito",
     "username": "DistritoStreamingUniversal",
     "chat_id": -1004439810137,
-    "bot_username": "DistritoStreamingUniversal_Bot"
+    "bot_username": "DistritoStreamingUniversal_Bot",
+    "registration_only": false
   },
   {
     "order": 2,
@@ -13,7 +14,8 @@
     "short": "Perucho",
     "username": "StreamingDigitalPerucho",
     "chat_id": -1003979507133,
-    "bot_username": "StreamingDigitalPerucho_bot"
+    "bot_username": "StreamingDigitalPerucho_bot",
+    "registration_only": false
   },
   {
     "order": 3,
@@ -21,7 +23,8 @@
     "short": "Perú Entret.",
     "username": "PeruEntretenimientoStreaming",
     "chat_id": -1004422680165,
-    "bot_username": "PeruEntretenimientoStreaming_Bot"
+    "bot_username": "PeruEntretenimientoStreaming_Bot",
+    "registration_only": false
   },
   {
     "order": 4,
@@ -29,7 +32,8 @@
     "short": "Cachinero",
     "username": "MundoCachineroStreaming",
     "chat_id": -1004377676143,
-    "bot_username": "MUCASTBOT"
+    "bot_username": "MUCASTBOT",
+    "registration_only": false
   },
   {
     "order": 5,
@@ -37,7 +41,8 @@
     "short": "Universo",
     "username": "mundocibertetico",
     "chat_id": -1001925756345,
-    "bot_username": "UniversoCibertneticoPeru_bot"
+    "bot_username": "UniversoCibertneticoPeru_bot",
+    "registration_only": false
   },
   {
     "order": 6,
@@ -45,7 +50,8 @@
     "short": "Metaverso",
     "username": "metaversostreaminggo",
     "chat_id": -1001826153639,
-    "bot_username": "MetaversoPeru_bot"
+    "bot_username": "MetaversoPeru_bot",
+    "registration_only": false
   },
   {
     "order": 7,
@@ -53,7 +59,8 @@
     "short": "Mundo Stream.",
     "username": "mymundostreaming",
     "chat_id": -1001552260050,
-    "bot_username": "MundoStreamingPeru_bot"
+    "bot_username": "MundoStreamingPeru_bot",
+    "registration_only": false
   },
   {
     "order": 8,
@@ -61,7 +68,8 @@
     "short": "Club Premium",
     "username": "Club_Premium_Latino_Digital",
     "chat_id": -1003978700843,
-    "bot_username": "Club_Premium_Latino_bot"
+    "bot_username": "Club_Premium_Latino_bot",
+    "registration_only": false
   },
   {
     "order": 9,
@@ -69,7 +77,8 @@
     "short": "Mundo Play",
     "username": "Mundo_Play_E_Digital",
     "chat_id": -1003931120063,
-    "bot_username": "Mundo_Play_E_Digital_bot"
+    "bot_username": "Mundo_Play_E_Digital_bot",
+    "registration_only": false
   },
   {
     "order": 10,
@@ -77,7 +86,8 @@
     "short": "Conecta2",
     "username": "Conectados_Streaming_Servicios",
     "chat_id": -1003726481086,
-    "bot_username": "Conecta2_Streaming_bot"
+    "bot_username": "Conecta2_Streaming_bot",
+    "registration_only": false
   },
   {
     "order": 11,
@@ -85,7 +95,8 @@
     "short": "Imperio",
     "username": "Imperio_Digital_Streaming",
     "chat_id": -1004423452394,
-    "bot_username": "Imperio_Digital_Streaming_bot"
+    "bot_username": "Imperio_Digital_Streaming_bot",
+    "registration_only": false
   },
   {
     "order": 12,
@@ -93,6 +104,88 @@
     "short": "Digital Club",
     "username": "The_Digital_Club_Peru_Latam",
     "chat_id": -1004405432244,
-    "bot_username": "The_Digital_Club_Peru_Latam_bot"
+    "bot_username": "The_Digital_Club_Peru_Latam_bot",
+    "registration_only": false
+  },
+  {
+    "order": 13,
+    "name": "ALTA FRECUENCIA STREAMING 🎼🎬",
+    "short": "Alta Frecuencia",
+    "username": "Alta_Frecuencia_Streaming",
+    "chat_id": -1004317399991,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 14,
+    "name": "PUNTO DE ENCUENTRO LATINO 🌎",
+    "short": "Punto Encuentro",
+    "username": "Punto_de_Encuentro_latino",
+    "chat_id": -1004433173418,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 15,
+    "name": "HORIZONTE DEL PACÍFICO STREAMING 🌊🤘",
+    "short": "Horizonte",
+    "username": "Horizonte_Del_Pacifico_Streaming",
+    "chat_id": -1004235409072,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 16,
+    "name": "AVENIDA CENTRAL DIGITAL 💃🕺",
+    "short": "Av. Central",
+    "username": "Avenida_Central_Digital",
+    "chat_id": -1004341285447,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 17,
+    "name": "CÍRCULO ABIERTO STREAMING 🫶✍️",
+    "short": "Círculo Abierto",
+    "username": "Circulo_Abierto_Streaming",
+    "chat_id": -1004466975322,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 18,
+    "name": "TERRITORIO INDIGO DIGITAL 🤖👺",
+    "short": "Territorio Indigo",
+    "username": "Territorio_Indigo_Digital",
+    "chat_id": -1004237217727,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 19,
+    "name": "LA QUINTA AVENIDA STREAMING 🛑🚨",
+    "short": "Quinta Avenida",
+    "username": "La_Quinta_Avenida_Streaming",
+    "chat_id": -1004477701224,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 20,
+    "name": "COSTA DORADA ENTRETENIMIENTO 🍀🌿🌼",
+    "short": "Costa Dorada",
+    "username": "Costa_Dorada_Entretenimiento",
+    "chat_id": -1004306362140,
+    "bot_username": "",
+    "registration_only": true
+  },
+  {
+    "order": 21,
+    "name": "NUEVA ERA DE CONEXIONES 👽🫂",
+    "short": "Nueva Era",
+    "username": "Nueva_Era_De_Conexiones",
+    "chat_id": -1004373558282,
+    "bot_username": "",
+    "registration_only": true
   }
 ]

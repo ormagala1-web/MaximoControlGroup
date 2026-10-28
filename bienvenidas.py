@@ -285,8 +285,11 @@ class WelcomeService:
         user,states,last=self.data(uid)
         if not user:return 'Ficha no disponible.'
         g=self.selected_group(uid)
-        inside=sum(s['present']==1 for s in states.values())
-        outside=sum(s['present']==0 for s in states.values())
+        # El resumen debe contar los mismos 21 grupos que muestra el teclado.
+        # Los estados históricos de chats fuera del catálogo no se eliminan.
+        current_states=[states.get(g['chat_id'],{}).get('present') for g in self.groups]
+        inside=sum(present==1 for present in current_states)
+        outside=sum(present==0 for present in current_states)
         username=('@'+html.escape(user['username'])) if user['username'] else 'Sin @usuario público'
         text=(f'🛂 <b>FICHA INDIVIDUAL · REGISTRO EN VIVO</b>\n━━━━━━━━━━━━━━━━━━━━\n'
               f'<b>{html.escape(user["name"][:200])}</b>\n'

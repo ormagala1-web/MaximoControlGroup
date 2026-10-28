@@ -278,8 +278,11 @@ class WelcomeService:
             view=c.execute('SELECT kind,value FROM bienvenida_vistas WHERE user_id=?',(uid,)).fetchone()
         _,_,last=self.data(uid)
         if view and view['kind']=='g':
-            return next(g for g in self.groups if g['order']==view['value'])
-        return self.by_chat[last['chat_id']] if last else self.groups[0]
+            selected=next((g for g in self.groups if g['order']==view['value']),None)
+            if selected is not None:
+                return selected
+        # Historical events may belong to chats removed from the official catalog.
+        return self.by_chat.get(last['chat_id'],self.groups[0]) if last else self.groups[0]
 
     def card_text(self,uid):
         user,states,last=self.data(uid)
@@ -296,8 +299,9 @@ class WelcomeService:
               f'🆔 <b>ID:</b> <code>{uid}</code>\n👤 <b>USER:</b> {username}\n\n'
               f'🟢 {inside} dentro · 🔴 {outside} fuera · ⚪ {len(self.groups)-inside-outside} sin verificar\n')
         if last:
-            current=self.by_chat[last['chat_id']]
-            text+=f'\n<b>ÚLTIMA ACTIVIDAD</b>\n{last["kind"]} · {html.escape(current["name"])}\nChat ID: <code>{current["chat_id"]}</code>\n🕒 {visible_date(last["occurred_at"])}\n'
+            current=self.by_chat.get(last['chat_id'])
+            label=html.escape(current['name']) if current else 'Grupo histórico (fuera del catálogo)'
+            text+=f'\n<b>ÚLTIMA ACTIVIDAD</b>\n{html.escape(last["kind"])} · {label}\nChat ID: <code>{last["chat_id"]}</code>\n🕒 {visible_date(last["occurred_at"])}\n'
         text+='\n'+self.group_detail(uid,g['order'])
         text+='\nHora de Perú · Selecciona un grupo para consultar sus fechas.\nUna ficha por usuario · Historial completo en MOVIMIENTOS.'
         return text
@@ -352,8 +356,9 @@ class WelcomeService:
             rows=c.execute("SELECT * FROM bienvenida_eventos WHERE user_id=? AND source<>'HISTORICO' AND occurred_at>=(SELECT value FROM bienvenida_meta WHERE key='live_registration_started_at') ORDER BY occurred_at DESC,id DESC LIMIT 8 OFFSET ?",(uid,page*8)).fetchall()
         body=f'📖 <b>MOVIMIENTOS · ID {uid}</b>\nPágina {page+1}\n'
         for e in rows:
-            g=self.by_chat[e['chat_id']]
-            body+=f'\n{"🟢" if e["kind"]=="ENTRADA" else "🔴"} <b>{e["kind"]}</b> · {html.escape(g["short"])}\n{visible_date(e["occurred_at"])} · {e["source"]}\n'
+            g=self.by_chat.get(e['chat_id'])
+            label=html.escape(g['short']) if g else 'Grupo histórico (fuera del catálogo)'
+            body+=f'\n{"🟢" if e["kind"]=="ENTRADA" else "🔴"} <b>{html.escape(e["kind"])}</b> · {label}\n{visible_date(e["occurred_at"])} · {html.escape(e["source"])}\n'
         return body+'\nHora de Perú'
 
     async def reconcile(self,bot,uid):

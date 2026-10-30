@@ -1,30 +1,27 @@
 {
   "project": "MaximoControlGroup_bot",
   "telegram_bot": "@MaximoControlGroup_bot",
-  "version": "1.0.20-rc.2",
+  "version": "1.0.20-rc.3",
   "status": "CANDIDATE",
   "base_version": "1.0.19",
   "base_commit": "49aa90476c48211a3226d3dee03bf35187e797d0",
   "timezone": "America/Lima",
-  "updated_at": "27/10/2026",
-  "title": "REGISTRO 21 DE ENTRADAS Y SALIDAS CON ACTUALIZACION PRIORITARIA",
-  "live_validation": "PENDING_RC2",
+  "updated_at": "30/10/2026",
+  "title": "AUDITORÍA Y MONITOREO REAL 21/21",
+  "live_validation": "PENDING_RC3",
   "scope": [
-    "Ficha y movimientos de 21 grupos, conservando los 12 originales y su historial.",
-    "Nueve adicionales sólo de registro, consulta y eliminación del aviso de ingreso; sin reglas heredadas.",
-    "IDs resueltos automáticamente y persistidos; permiso de borrado comprobado.",
-    "Eliminar exclusivamente new_chat_members; conservar bienvenidas personalizadas y otros mensajes.",
-    "Cola persistente con reintentos; no afirmar borrado si Telegram lo impide.",
-    "Conservar integración de Membresías, membresía obligatoria 12/12, reglas, exclusiones y controles existentes.",
-    "Una salida o expulsión real inicia seguimiento sin exigir ingreso previo; sin inventar fechas ni reconstruir eventos perdidos.",
-    "Publicación de fichas separada de consultas; movimientos y peticiones administrativas con prioridad.",
-    "Diagnóstico por ID de perfil, grupo, tipo de movimiento y origen del evento."
+    "Moderación y catálogo actuales de 21 grupos; etiquetas de actividad, publicidad y raíz coherentes.",
+    "Monitoreo de 21 grupos con estado independiente del historial original; sin inventar membresías.",
+    "Errores de consulta diferenciados de salidas confirmadas.",
+    "Limpieza exclusiva de avisos de ingreso; conservar mensajes de salida e historial."
   ],
-  "revision": 7,
-  "revision_scope": "Registro y ficha de 21 grupos; limpieza exclusiva de avisos de ingreso con moderacion original aislada en 12 grupos.",
+  "revision": 8,
+  "revision_scope": "Corrección de nomenclaturas y monitoreo; conserva datos históricos y controles de 21 grupos ya existentes.",
   "candidate_base_commit": "cc84ebb",
   "candidate_commit": null,
   "approval_date": null,
   "approval_note": null,
-  "base_backup": "R032"
+  "base_backup": "R035",
+  "candidate_base_version": "1.0.20-rc.2",
+  "validacion_local": "10 pruebas offline aprobadas; prueba SQLite sobre copia del respaldo; Telegram pendiente"
 }

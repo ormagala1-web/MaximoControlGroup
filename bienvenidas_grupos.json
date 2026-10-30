@@ -113,8 +113,8 @@
     "short": "Alta Frecuencia",
     "username": "Alta_Frecuencia_Streaming",
     "chat_id": -1004317399991,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "ALTA_FRECUENCIA_STREAMING_bot",
+    "registration_only": false
   },
   {
     "order": 14,
@@ -122,8 +122,8 @@
     "short": "Punto Encuentro",
     "username": "Punto_de_Encuentro_latino",
     "chat_id": -1004433173418,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "PUNTO_DE_ENCUENTRO_LATINO_bot",
+    "registration_only": false
   },
   {
     "order": 15,
@@ -131,8 +131,8 @@
     "short": "Horizonte",
     "username": "Horizonte_Del_Pacifico_Streaming",
     "chat_id": -1004235409072,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "Horizonte_Pacifico_Streaming_Bot",
+    "registration_only": false
   },
   {
     "order": 16,
@@ -140,8 +140,8 @@
     "short": "Av. Central",
     "username": "Avenida_Central_Digital",
     "chat_id": -1004341285447,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "AVENIDA_CENTRAL_DIGITAL_BOT",
+    "registration_only": false
   },
   {
     "order": 17,
@@ -149,8 +149,8 @@
     "short": "Círculo Abierto",
     "username": "Circulo_Abierto_Streaming",
     "chat_id": -1004466975322,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "CIRCULO_ABIERTO_STREAMING_bot",
+    "registration_only": false
   },
   {
     "order": 18,
@@ -158,8 +158,8 @@
     "short": "Territorio Indigo",
     "username": "Territorio_Indigo_Digital",
     "chat_id": -1004237217727,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "TERRITORIO_INDIGO_DIGITAL_BOT",
+    "registration_only": false
   },
   {
     "order": 19,
@@ -167,8 +167,8 @@
     "short": "Quinta Avenida",
     "username": "La_Quinta_Avenida_Streaming",
     "chat_id": -1004477701224,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "La_Quinta_Avenida_Streaming_bot",
+    "registration_only": false
   },
   {
     "order": 20,
@@ -176,8 +176,8 @@
     "short": "Costa Dorada",
     "username": "Costa_Dorada_Entretenimiento",
     "chat_id": -1004306362140,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "Costa_Dorada_Entrete_Bot",
+    "registration_only": false
   },
   {
     "order": 21,
@@ -185,7 +185,7 @@
     "short": "Nueva Era",
     "username": "Nueva_Era_De_Conexiones",
     "chat_id": -1004373558282,
-    "bot_username": "",
-    "registration_only": true
+    "bot_username": "Nueva_Era_Conexiones_Bot",
+    "registration_only": false
   }
 ]
